@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from prometheus_client import REGISTRY
 
-from agentgauge.wrapper import InstrumentedMessages
+from agentgauge.anthropic_wrapper import InstrumentedMessages
 
 MODEL = "claude-sonnet-4-5-20250929"
 

@@ -11,13 +11,17 @@ version = "0.1.0"
 requires-python = ">=3.10"
 dependencies = [
     "prometheus-client>=0.20",
-    "anthropic>=0.39",
 ]
 
 [project.optional-dependencies]
+anthropic = ["anthropic>=0.39"]
+openai = ["openai>=1.0"]
+all = ["anthropic>=0.39", "openai>=1.0"]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.24",
     "ruff>=0.8",
     "python-dotenv",
+    "anthropic>=0.39",
+    "openai>=1.0",
 ]

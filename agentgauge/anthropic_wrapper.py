@@ -11,7 +11,7 @@ from .metrics import (
     LLM_TOOL_CALLS_TOTAL,
 )
 
-def _extract_tool_calls(response: Any) -> list[str]:
+def _extract_tool_calls_anthropic(response: Any) -> list[str]:
     """Extract tool names from response content blocks.
 
     Args:
@@ -64,7 +64,7 @@ class InstrumentedMessages:
                 response.usage.output_tokens
             )
 
-        for tool_name in _extract_tool_calls(response):
+        for tool_name in _extract_tool_calls_anthropic(response):
             LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
 
         return response

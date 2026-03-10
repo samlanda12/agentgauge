@@ -1,6 +1,10 @@
 # agentgauge
 
-Lightweight Prometheus metrics exporter for AI agent pipelines. Wraps the Anthropic SDK to expose token usage, latency, and tool calls as native Prometheus metrics. No OpenTelemetry or other external infrastructure required.
+Lightweight Prometheus metrics exporter for AI agent pipelines. Wraps LLM client SDKs to expose token usage, latency, and tool calls as native Prometheus metrics. No OpenTelemetry or other external infrastructure required.
+
+Supports:
+- **Anthropic** (`anthropic.Anthropic`)
+- **OpenAI** and **OpenAI-compatible providers** (OpenRouter, Together, Groq, etc.)
 
 ## Install
 
@@ -9,6 +13,8 @@ pip install agentgauge
 ```
 
 ## Usage
+
+### Anthropic
 
 ```python
 import anthropic
@@ -22,6 +28,30 @@ response = client.messages.create(...)
 # Metrics available at http://localhost:9464/metrics
 ```
 
+### OpenAI and OpenAI-compatible providers
+
+Works with OpenAI and any provider using the OpenAI SDK:
+
+```python
+from openai import OpenAI
+from agentgauge import instrument
+
+# Standard OpenAI
+client = instrument(OpenAI())
+
+# Or with an OpenAI-compatible provider (OpenRouter, Together, Groq, etc.)
+client = instrument(
+    OpenAI(
+        api_key="your-api-key",
+        base_url="https://your-provider.com/v1",
+    )
+)
+
+response = client.chat.completions.create(...)
+
+# Metrics available at http://localhost:9464/metrics
+```
+
 ## Metrics
 
 | Metric | Type | Labels |
@@ -30,6 +60,7 @@ response = client.messages.create(...)
 | `llm_request_duration_seconds` | Histogram | `model`, `method` |
 | `llm_tokens_total` | Counter | `model`, `token_type` |
 | `llm_active_requests` | Gauge | `model` |
+| `llm_tool_calls_total` | Counter | `model`, `tool_name` |
 
 ## Common Queries
 
