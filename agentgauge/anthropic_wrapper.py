@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Iterator
 
 from .metrics import (
     LLM_ACTIVE_REQUESTS,
@@ -68,6 +68,64 @@ class InstrumentedMessages:
             LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
 
         return response
+
+    def stream(self, **kwargs: Any) -> Iterator[Any]:
+        """Stream messages with duration and token tracking.
+        
+        Wraps the messages.stream() method to track request duration,
+        token usage, and tool calls while streaming the response.
+        
+        Args:
+            **kwargs: Arguments passed to messages.stream()
+            
+        Yields:
+            Stream events from the underlying messages.stream() call
+        """
+        model = kwargs.get("model", "unknown")
+        start = time.monotonic()
+        status = "ok"
+
+        LLM_ACTIVE_REQUESTS.labels(model=model).inc()
+        
+        try:
+            stream = self._messages.stream(**kwargs)
+        except Exception:
+            status = "error"
+            duration = time.monotonic() - start
+            LLM_ACTIVE_REQUESTS.labels(model=model).dec()
+            LLM_REQUESTS_TOTAL.labels(model=model, method="stream", status=status).inc()
+            LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="stream").observe(duration)
+            raise
+
+        try:
+            for event in stream:
+                yield event
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            duration = time.monotonic() - start
+            LLM_ACTIVE_REQUESTS.labels(model=model).dec()
+            LLM_REQUESTS_TOTAL.labels(model=model, method="stream", status=status).inc()
+            LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="stream").observe(duration)
+            
+            # Try to extract final message for token usage and tool calls
+            try:
+                if hasattr(stream, "get_final_message"):
+                    final_message = stream.get_final_message()
+                    if hasattr(final_message, "usage") and final_message.usage is not None:
+                        LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(
+                            final_message.usage.input_tokens
+                        )
+                        LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(
+                            final_message.usage.output_tokens
+                        )
+                    
+                    for tool_name in _extract_tool_calls_anthropic(final_message):
+                        LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
+            except Exception:
+                # If we can't get the final message, just skip token tracking
+                pass
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._messages, name)

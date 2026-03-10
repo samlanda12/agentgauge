@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, Iterator
 
 from .metrics import (
     LLM_ACTIVE_REQUESTS,
@@ -72,6 +72,64 @@ class InstrumentedChatCompletion:
             LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
 
         return response
+
+    def stream(self, **kwargs: Any) -> Iterator[Any]:
+        """Stream chat completions with duration and token tracking.
+        
+        Wraps the chat.completions.create(stream=True) method to track request duration,
+        token usage, and tool calls while streaming the response.
+        
+        Args:
+            **kwargs: Arguments passed to chat.completions.create(stream=True)
+            
+        Yields:
+            Stream chunks from the underlying chat.completions.create() call
+        """
+        model = kwargs.get("model", "unknown")
+        start = time.monotonic()
+        status = "ok"
+
+        LLM_ACTIVE_REQUESTS.labels(model=model).inc()
+        
+        try:
+            stream = self._completions.create(**kwargs)
+        except Exception:
+            status = "error"
+            duration = time.monotonic() - start
+            LLM_ACTIVE_REQUESTS.labels(model=model).dec()
+            LLM_REQUESTS_TOTAL.labels(model=model, method="stream", status=status).inc()
+            LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="stream").observe(duration)
+            raise
+
+        try:
+            for chunk in stream:
+                yield chunk
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            duration = time.monotonic() - start
+            LLM_ACTIVE_REQUESTS.labels(model=model).dec()
+            LLM_REQUESTS_TOTAL.labels(model=model, method="stream", status=status).inc()
+            LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="stream").observe(duration)
+            
+            # Try to extract final response for token usage and tool calls
+            try:
+                if hasattr(stream, "get_final_response"):
+                    final_response = stream.get_final_response()
+                    if hasattr(final_response, "usage") and final_response.usage is not None:
+                        LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(
+                            final_response.usage.prompt_tokens
+                        )
+                        LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(
+                            final_response.usage.completion_tokens
+                        )
+                    
+                    for tool_name in _extract_tool_calls_openai(final_response):
+                        LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
+            except Exception:
+                # If we can't get the final response, just skip token tracking
+                pass
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._completions, name)
