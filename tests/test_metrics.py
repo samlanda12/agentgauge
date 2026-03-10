@@ -8,6 +8,7 @@ from agentgauge.metrics import (
     LLM_REQUEST_DURATION_SECONDS,
     LLM_REQUESTS_TOTAL,
     LLM_TOKENS_TOTAL,
+    LLM_TOOL_CALLS_TOTAL,
 )
 
 MODEL = "claude-sonnet-4-5-20250929"
@@ -17,6 +18,7 @@ MODEL = "claude-sonnet-4-5-20250929"
     "llm_request_duration_seconds",
     "llm_tokens",
     "llm_active_requests",
+    "llm_tool_calls",
 ])
 def test_metric_registered(name):
     metric_names = {m.name for m in REGISTRY.collect()}
@@ -27,6 +29,7 @@ def test_metric_registered(name):
     (LLM_REQUEST_DURATION_SECONDS,"llm_request_duration_seconds", ("model", "method")),
     (LLM_TOKENS_TOTAL,            "llm_tokens",                ("model", "token_type")),
     (LLM_ACTIVE_REQUESTS,         "llm_active_requests",       ("model",)),
+    (LLM_TOOL_CALLS_TOTAL,        "llm_tool_calls",            ("model", "tool_name")),
 ])
 def test_metric_shape(metric, expected_name, expected_labels):
     assert metric._name == expected_name
@@ -62,3 +65,11 @@ def test_active_requests_gauge():
     gauge.dec()
 
     assert REGISTRY.get_sample_value("llm_active_requests", {"model": MODEL}) == 1.0
+
+
+def test_increment_tool_calls():
+    LLM_TOOL_CALLS_TOTAL.labels(model=MODEL, tool_name="web_search").inc(3)
+    LLM_TOOL_CALLS_TOTAL.labels(model=MODEL, tool_name="calculator").inc(1)
+
+    assert REGISTRY.get_sample_value("llm_tool_calls_total", {"model": MODEL, "tool_name": "web_search"}) == 3.0
+    assert REGISTRY.get_sample_value("llm_tool_calls_total", {"model": MODEL, "tool_name": "calculator"}) == 1.0

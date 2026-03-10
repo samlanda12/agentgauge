@@ -8,7 +8,26 @@ from .metrics import (
     LLM_REQUEST_DURATION_SECONDS,
     LLM_REQUESTS_TOTAL,
     LLM_TOKENS_TOTAL,
+    LLM_TOOL_CALLS_TOTAL,
 )
+
+def _extract_tool_calls(response: Any) -> list[str]:
+    """Extract tool names from response content blocks.
+
+    Args:
+        response: The API response object.
+
+    Returns:
+        A list of tool names that were called.
+    """
+    tool_names = []
+    if hasattr(response, "content") and response.content is not None:
+        for block in response.content:
+            if hasattr(block, "type") and block.type == "tool_use":
+                if hasattr(block, "name"):
+                    tool_names.append(block.name)
+    return tool_names
+
 
 class InstrumentedMessages:
     """Proxy around an Anthropic "messages" resource.
@@ -44,6 +63,9 @@ class InstrumentedMessages:
             LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(
                 response.usage.output_tokens
             )
+
+        for tool_name in _extract_tool_calls(response):
+            LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
 
         return response
 

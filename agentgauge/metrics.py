@@ -24,3 +24,9 @@ LLM_ACTIVE_REQUESTS = Gauge(
     "Number of in-flight LLM API requests",
     ["model"],
 )
+
+LLM_TOOL_CALLS_TOTAL = Counter(
+    "llm_tool_calls_total",
+    "Total number of tool calls made by the LLM",
+    ["model", "tool_name"],
+)
