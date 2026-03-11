@@ -1,4 +1,4 @@
-"""Shared fixtures for the prometheus-agent-metrics test suite."""
+"""Shared fixtures for the agentgauge test suite."""
 
 import pytest
 

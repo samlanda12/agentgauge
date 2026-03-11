@@ -270,16 +270,16 @@ class TestStreamErrorHandling:
         class FailingStream:
             def __init__(self):
                 self._chunks = ["chunk1"]
-                
+
             def __iter__(self):
                 def failing_generator():
                     yield "chunk1"
                     raise RuntimeError("Stream failed")
                 return failing_generator()
-            
+
             def __enter__(self):
                 return self
-            
+
             def __exit__(self, exc_type, exc_val, exc_tb):
                 return False
 
@@ -314,12 +314,12 @@ class TestStreamErrorHandling:
         """Test that active requests gauge is decremented even if stream is not fully consumed."""
         inner.stream.return_value = FakeStream(events=["chunk1", "chunk2", "chunk3"])
         wrapped = InstrumentedMessages(inner)
-        
+
         with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
             # Only consume first chunk, then abandon
             first = next(iter(stream))
             assert first == "chunk1"
-        
+
         # After context exits, active requests should be back to zero
         assert _sample("llm_active_requests", model=MODEL) == 0.0
         # Request should still be counted
@@ -346,7 +346,7 @@ class TestStreamDelegation:
                 return self
             def __exit__(self, exc_type, exc_val, exc_tb):
                 return False
-        
+
         inner.stream.return_value = MinimalStream(["chunk1", "chunk2"])
         wrapped = InstrumentedMessages(inner)
         result = None
@@ -380,11 +380,34 @@ class TestStreamDelegation:
         inner.stream.return_value = FakeStream(events=["chunk1", "chunk2"])
         wrapped = InstrumentedMessages(inner)
         stream = wrapped.stream(model=MODEL, max_tokens=1024, messages=[])
-        
+
         # Attempting to iterate without context manager should raise
         with pytest.raises(RuntimeError, match="must be used as a context manager"):
             list(stream)
-        
+
         # No metrics should be recorded since we never entered context
         assert _sample("llm_requests_total", model=MODEL, method="stream", status="ok") is None
         assert _sample("llm_requests_total", model=MODEL, method="stream", status="error") is None
+
+    def test_delegates_attributes_to_underlying_stream(self, inner):
+        """Test that all MessageStream attributes are properly delegated."""
+        # Create a mock stream with additional attributes
+        mock_stream = MagicMock()
+        mock_stream.__iter__ = lambda self: iter(["chunk"])
+        mock_stream.__enter__ = lambda self: self
+        mock_stream.__exit__ = lambda self, exc_type, exc_val, exc_tb: False
+        mock_stream.get_final_text.return_value = "Final text response"
+        mock_stream.text_stream = ["text1", "text2"]
+        mock_stream.accumulators = {"acc1": "value1"}
+
+        inner.stream.return_value = mock_stream
+        wrapped = InstrumentedMessages(inner)
+
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            # Test that attributes are delegated
+            assert stream.get_final_text() == "Final text response"
+            assert stream.text_stream == ["text1", "text2"]
+            assert stream.accumulators == {"acc1": "value1"}
+
+            # Consume the stream
+            list(stream)

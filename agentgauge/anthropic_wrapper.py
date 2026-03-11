@@ -132,13 +132,13 @@ class InstrumentedStream:
         if exc_type is not None:
             self._status = "error"
 
-        self._record_metrics()
-
         # Exit the underlying context manager
         try:
             self._stream_cm.__exit__(exc_type, exc_val, exc_tb)
         except Exception:
             pass
+
+        self._record_metrics()
 
         return False
 
@@ -198,3 +198,14 @@ class InstrumentedStream:
     def get_final_message(self) -> Any:
         """Get the final message from the stream (delegates to underlying stream)."""
         return self._stream_cm.get_final_message()
+
+    def __getattr__(self, name: str) -> Any:
+        """Delegate all other attributes to the underlying stream context manager.
+
+        This exposes the full MessageStream API including:
+        - get_final_text()
+        - text_stream
+        - accumulators
+        - And any other MessageStream attributes
+        """
+        return getattr(self._stream_cm, name)
