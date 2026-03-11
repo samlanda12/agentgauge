@@ -140,6 +140,10 @@ class InstrumentedOpenAIStream:
             self._status = "error"
 
         self._record_metrics()
+
+        if hasattr(self._stream, "close"):
+            self._stream.close()
+
         return False
 
     def __iter__(self) -> Iterator[Any]:

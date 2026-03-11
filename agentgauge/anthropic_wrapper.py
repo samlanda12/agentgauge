@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Iterator, Optional
 
@@ -10,6 +11,8 @@ from .metrics import (
     LLM_TOKENS_TOTAL,
     LLM_TOOL_CALLS_TOTAL,
 )
+
+logger = logging.getLogger(__name__)
 
 def _extract_tool_calls_anthropic(response: Any) -> list[str]:
     """Extract tool names from response content blocks.
@@ -135,8 +138,12 @@ class InstrumentedStream:
         # Exit the underlying context manager
         try:
             self._stream_cm.__exit__(exc_type, exc_val, exc_tb)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception(
+                "Exception during stream cleanup for model %s: %s",
+                self._model,
+                e,
+            )
 
         self._record_metrics()
 
