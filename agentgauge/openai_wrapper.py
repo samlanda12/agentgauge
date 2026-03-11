@@ -82,6 +82,8 @@ class InstrumentedChatCompletion:
         Args:
             **kwargs: Arguments passed to chat.completions.create()
                      (stream=True is enforced and will override if set to False)
+                     (stream_options={"include_usage": True} is automatically injected
+                      for token tracking and will be merged with any existing stream_options)
 
         Returns:
             An InstrumentedOpenAIStream context manager that yields stream chunks
@@ -93,6 +95,10 @@ class InstrumentedChatCompletion:
         """
         # Enforce stream=True
         kwargs["stream"] = True
+
+        # Automatically inject stream_options to enable usage tracking
+        existing_options = kwargs.get("stream_options", {})
+        kwargs["stream_options"] = {**existing_options, "include_usage": True}
 
         try:
             stream = self._completions.create(**kwargs)

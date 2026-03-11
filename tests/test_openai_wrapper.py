@@ -370,8 +370,27 @@ class TestStreamDelegation:
         kwargs = {"model": MODEL, "messages": [{"role": "user", "content": "hi"}]}
         with wrapped.stream(**kwargs) as stream:
             list(stream)
-        # stream() should enforce stream=True
-        expected_kwargs = {**kwargs, "stream": True}
+        # stream() should enforce stream=True and inject stream_options
+        expected_kwargs = {**kwargs, "stream": True, "stream_options": {"include_usage": True}}
+        inner.create.assert_called_once_with(**expected_kwargs)
+
+    def test_merges_existing_stream_options(self, inner):
+        """Test that existing stream_options are preserved when injecting include_usage."""
+        inner.create.return_value = FakeStream(chunks=["chunk"])
+        wrapped = InstrumentedChatCompletion(inner)
+        kwargs = {
+            "model": MODEL,
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream_options": {"continuous_usage": True}
+        }
+        with wrapped.stream(**kwargs) as stream:
+            list(stream)
+        # Should merge existing options with include_usage
+        expected_kwargs = {
+            **kwargs,
+            "stream": True,
+            "stream_options": {"continuous_usage": True, "include_usage": True}
+        }
         inner.create.assert_called_once_with(**expected_kwargs)
 
     def test_handles_stream_without_final_response(self, inner):
