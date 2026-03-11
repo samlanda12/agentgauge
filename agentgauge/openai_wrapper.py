@@ -61,12 +61,11 @@ class InstrumentedChatCompletion:
             LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="create").observe(duration)
 
         if hasattr(response, "usage") and response.usage is not None:
-            LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(
-                response.usage.prompt_tokens
-            )
-            LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(
-                response.usage.completion_tokens
-            )
+            input_tokens = response.usage.prompt_tokens
+            output_tokens = response.usage.completion_tokens
+
+            LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
+            LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
 
         for tool_name in _extract_tool_calls_openai(response):
             LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
@@ -75,13 +74,13 @@ class InstrumentedChatCompletion:
 
     def stream(self, **kwargs: Any) -> Iterator[Any]:
         """Stream chat completions with duration and token tracking.
-        
+
         Wraps the chat.completions.create(stream=True) method to track request duration,
         token usage, and tool calls while streaming the response.
-        
+
         Args:
             **kwargs: Arguments passed to chat.completions.create(stream=True)
-            
+
         Yields:
             Stream chunks from the underlying chat.completions.create() call
         """
@@ -90,7 +89,7 @@ class InstrumentedChatCompletion:
         status = "ok"
 
         LLM_ACTIVE_REQUESTS.labels(model=model).inc()
-        
+
         try:
             stream = self._completions.create(**kwargs)
         except Exception:
@@ -112,19 +111,18 @@ class InstrumentedChatCompletion:
             LLM_ACTIVE_REQUESTS.labels(model=model).dec()
             LLM_REQUESTS_TOTAL.labels(model=model, method="stream", status=status).inc()
             LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="stream").observe(duration)
-            
+
             # Try to extract final response for token usage and tool calls
             try:
                 if hasattr(stream, "get_final_response"):
                     final_response = stream.get_final_response()
                     if hasattr(final_response, "usage") and final_response.usage is not None:
-                        LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(
-                            final_response.usage.prompt_tokens
-                        )
-                        LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(
-                            final_response.usage.completion_tokens
-                        )
-                    
+                        input_tokens = final_response.usage.prompt_tokens
+                        output_tokens = final_response.usage.completion_tokens
+
+                        LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
+                        LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+
                     for tool_name in _extract_tool_calls_openai(final_response):
                         LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
             except Exception:

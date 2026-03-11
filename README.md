@@ -71,6 +71,44 @@ response = client.chat.completions.create(...)
 | `sum(rate(llm_requests_total{status="error"}[5m])) / sum(rate(llm_requests_total[5m]))` | Error rate |
 | `histogram_quantile(0.95, rate(llm_request_duration_seconds_bucket[5m]))` | p95 latency |
 
+## Cost Estimation
+
+agentgauge exports token counts by model, so you can compute costs in Grafana or
+PromQL using your own per-token rates. This keeps pricing accurate to your actual
+contracts and avoids bundling data that goes stale.
+
+Example recording rule (`prometheus.rules.yml`):
+
+```yaml
+groups:
+  - name: llm_cost
+    rules:
+      - record: llm_cost_per_second
+        # Map each model to its $/token rate directly in PromQL
+        expr: |
+          (
+              rate(llm_tokens_total{token_type="input"}[5m])
+            * on(model) group_left
+              (
+                  (label_replace(vector(0.000003), "model", "claude-sonnet-4-20250514", "", ""))
+                or
+                  (label_replace(vector(0.0000025), "model", "gpt-4o", "", ""))
+              )
+          )
+          +
+          (
+              rate(llm_tokens_total{token_type="output"}[5m])
+            * on(model) group_left
+              (
+                  (label_replace(vector(0.000015), "model", "claude-sonnet-4-20250514", "", ""))
+                or
+                  (label_replace(vector(0.00001), "model", "gpt-4o", "", ""))
+              )
+          )
+```
+
+Or for simpler setups, compute cost in a Grafana panel transformation.
+
 ## Prometheus config
 
 See `prometheus.yml` for example configuration.
