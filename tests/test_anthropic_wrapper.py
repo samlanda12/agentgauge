@@ -22,6 +22,12 @@ class FakeStream:
     def __iter__(self):
         return iter(self._events)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        return False
+
     def get_final_message(self):
         if self._final_message is None:
             raise RuntimeError("No final message available")
@@ -199,27 +205,32 @@ class TestStreamMetrics:
     def test_records_stream_request_count(self, inner):
         inner.stream.return_value = FakeStream(events=["chunk1", "chunk2"])
         wrapped = InstrumentedMessages(inner)
-        list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            list(stream)
         assert _sample("llm_requests_total", model=MODEL, method="stream", status="ok") == 1.0
 
     def test_records_stream_duration(self, inner):
         inner.stream.return_value = FakeStream(events=["chunk1", "chunk2"])
         wrapped = InstrumentedMessages(inner)
-        list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            list(stream)
         assert _sample("llm_request_duration_seconds_count", model=MODEL, method="stream") == 1.0
 
     def test_yields_all_stream_events(self, inner):
         events = ["event1", "event2", "event3"]
         inner.stream.return_value = FakeStream(events=events)
         wrapped = InstrumentedMessages(inner)
-        result = list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+        result = None
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            result = list(stream)
         assert result == events
 
     def test_records_tokens_from_final_message(self, inner):
         final_message = FakeMessage(usage=FakeUsage(input_tokens=150, output_tokens=30))
         inner.stream.return_value = FakeStream(events=["chunk"], final_message=final_message)
         wrapped = InstrumentedMessages(inner)
-        list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            list(stream)
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") == 150.0
         assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 30.0
 
@@ -229,52 +240,90 @@ class TestStreamMetrics:
         )
         inner.stream.return_value = FakeStream(events=["chunk"], final_message=final_message)
         wrapped = InstrumentedMessages(inner)
-        list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            list(stream)
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="web_search") == 1.0
 
     def test_multiple_stream_calls_accumulate(self, inner):
         inner.stream.return_value = FakeStream(events=["chunk"])
         wrapped = InstrumentedMessages(inner)
-        list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
-        list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            list(stream)
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            list(stream)
         assert _sample("llm_requests_total", model=MODEL, method="stream", status="ok") == 2.0
 
 
 class TestStreamErrorHandling:
     def test_error_during_stream_initialization(self, inner):
+        """When stream() call fails, only error counter is incremented - gauge and timer are untouched."""
         inner.stream.side_effect = RuntimeError("Stream init failed")
         wrapped = InstrumentedMessages(inner)
         with pytest.raises(RuntimeError, match="Stream init failed"):
-            list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+            with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+                list(stream)
         assert _sample("llm_requests_total", model=MODEL, method="stream", status="error") == 1.0
-        assert _sample("llm_active_requests", model=MODEL) == 0.0
+        # Gauge should never have been touched (None means no samples, which is correct)
+        assert _sample("llm_active_requests", model=MODEL) is None
 
     def test_error_during_stream_iteration(self, inner):
-        def failing_generator():
-            yield "chunk1"
-            raise RuntimeError("Stream failed")
+        class FailingStream:
+            def __init__(self):
+                self._chunks = ["chunk1"]
+                
+            def __iter__(self):
+                def failing_generator():
+                    yield "chunk1"
+                    raise RuntimeError("Stream failed")
+                return failing_generator()
+            
+            def __enter__(self):
+                return self
+            
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                return False
 
-        inner.stream.return_value = failing_generator()
+        inner.stream.return_value = FailingStream()
         wrapped = InstrumentedMessages(inner)
         with pytest.raises(RuntimeError, match="Stream failed"):
-            list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+            with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+                list(stream)
         assert _sample("llm_requests_total", model=MODEL, method="stream", status="error") == 1.0
         assert _sample("llm_active_requests", model=MODEL) == 0.0
 
-    def test_error_still_records_duration(self, inner):
+    def test_error_no_duration_for_init_failure(self, inner):
+        """Duration should NOT be recorded when stream initialization fails - the request barely existed."""
         inner.stream.side_effect = RuntimeError("Stream init failed")
         wrapped = InstrumentedMessages(inner)
         with pytest.raises(RuntimeError):
-            list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
-        assert _sample("llm_request_duration_seconds_count", model=MODEL, method="stream") == 1.0
+            with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+                list(stream)
+        # Duration histogram should have no samples for init failures
+        assert _sample("llm_request_duration_seconds_count", model=MODEL, method="stream") is None
 
     def test_tokens_not_recorded_on_error(self, inner):
         inner.stream.side_effect = RuntimeError("Stream init failed")
         wrapped = InstrumentedMessages(inner)
         with pytest.raises(RuntimeError):
-            list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+            with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+                list(stream)
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") is None
         assert _sample("llm_tokens_total", model=MODEL, token_type="output") is None
+
+    def test_abandoned_stream_releases_active_request_gauge(self, inner):
+        """Test that active requests gauge is decremented even if stream is not fully consumed."""
+        inner.stream.return_value = FakeStream(events=["chunk1", "chunk2", "chunk3"])
+        wrapped = InstrumentedMessages(inner)
+        
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            # Only consume first chunk, then abandon
+            first = next(iter(stream))
+            assert first == "chunk1"
+        
+        # After context exits, active requests should be back to zero
+        assert _sample("llm_active_requests", model=MODEL) == 0.0
+        # Request should still be counted
+        assert _sample("llm_requests_total", model=MODEL, method="stream", status="ok") == 1.0
 
 
 class TestStreamDelegation:
@@ -282,14 +331,27 @@ class TestStreamDelegation:
         inner.stream.return_value = FakeStream(events=["chunk"])
         wrapped = InstrumentedMessages(inner)
         kwargs = {"model": MODEL, "max_tokens": 512, "messages": [{"role": "user", "content": "hi"}]}
-        list(wrapped.stream(**kwargs))
+        with wrapped.stream(**kwargs) as stream:
+            list(stream)
         inner.stream.assert_called_once_with(**kwargs)
 
     def test_handles_stream_without_final_message(self, inner):
-        # Stream without get_final_message method
-        inner.stream.return_value = iter(["chunk1", "chunk2"])
+        # Stream without get_final_message method - needs to be a context manager
+        class MinimalStream:
+            def __init__(self, events):
+                self._events = events
+            def __iter__(self):
+                return iter(self._events)
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc_val, exc_tb):
+                return False
+        
+        inner.stream.return_value = MinimalStream(["chunk1", "chunk2"])
         wrapped = InstrumentedMessages(inner)
-        result = list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+        result = None
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            result = list(stream)
         assert result == ["chunk1", "chunk2"]
         # Should not record tokens since no final message
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") is None
@@ -300,11 +362,29 @@ class TestStreamDelegation:
 
         mock_stream = MagicMock()
         mock_stream.__iter__ = lambda self: iter(["chunk"])
+        mock_stream.__enter__ = lambda self: self
+        mock_stream.__exit__ = lambda self, exc_type, exc_val, exc_tb: False
         mock_stream.get_final_message = broken_get_final_message
         inner.stream.return_value = mock_stream
 
         wrapped = InstrumentedMessages(inner)
         # Should not raise, just skip token tracking
-        result = list(wrapped.stream(model=MODEL, max_tokens=1024, messages=[]))
+        result = None
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            result = list(stream)
         assert result == ["chunk"]
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") is None
+
+    def test_requires_context_manager(self, inner):
+        """Test that stream cannot be used without context manager."""
+        inner.stream.return_value = FakeStream(events=["chunk1", "chunk2"])
+        wrapped = InstrumentedMessages(inner)
+        stream = wrapped.stream(model=MODEL, max_tokens=1024, messages=[])
+        
+        # Attempting to iterate without context manager should raise
+        with pytest.raises(RuntimeError, match="must be used as a context manager"):
+            list(stream)
+        
+        # No metrics should be recorded since we never entered context
+        assert _sample("llm_requests_total", model=MODEL, method="stream", status="ok") is None
+        assert _sample("llm_requests_total", model=MODEL, method="stream", status="error") is None
