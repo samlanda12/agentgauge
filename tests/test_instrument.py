@@ -1,13 +1,13 @@
 """Tests for the instrument() public API."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, AsyncMock, patch
 
 import pytest
 
 import agentgauge
 from agentgauge import instrument
-from agentgauge.anthropic_wrapper import InstrumentedMessages
-from agentgauge.openai_wrapper import InstrumentedChatCompletion
+from agentgauge.anthropic_wrapper import InstrumentedAsyncMessages, InstrumentedMessages
+from agentgauge.openai_wrapper import InstrumentedAsyncChatCompletion, InstrumentedChatCompletion
 
 ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
 OPENAI_MODEL = "gpt-4-turbo"
@@ -33,6 +33,31 @@ def mock_openai_client():
         usage=MagicMock(prompt_tokens=10, completion_tokens=5),
         choices=[MagicMock(message=MagicMock(tool_calls=None))],
     )
+    # Remove messages attribute to make it OpenAI-only
+    del client.messages
+    return client
+
+
+@pytest.fixture
+def mock_async_anthropic_client():
+    client = MagicMock()
+    client.__class__.__name__ = "AsyncAnthropic"
+    client.messages.create = AsyncMock(return_value=MagicMock(
+        usage=MagicMock(input_tokens=10, output_tokens=5),
+    ))
+    # Remove chat attribute to make it Anthropic-only
+    del client.chat
+    return client
+
+
+@pytest.fixture
+def mock_async_openai_client():
+    client = MagicMock()
+    client.__class__.__name__ = "AsyncOpenAI"
+    client.chat.completions.create = AsyncMock(return_value=MagicMock(
+        usage=MagicMock(prompt_tokens=10, completion_tokens=5),
+        choices=[MagicMock(message=MagicMock(tool_calls=None))],
+    ))
     # Remove messages attribute to make it OpenAI-only
     del client.messages
     return client
@@ -115,3 +140,39 @@ def test_starts_server_only_once(mock_server, mock_anthropic_client):
 def test_start_server_false_skips(mock_server, mock_anthropic_client):
     instrument(mock_anthropic_client, start_server=False)
     mock_server.assert_not_called()
+
+
+# Async client detection
+
+def test_detects_async_anthropic_client(mock_async_anthropic_client):
+    wrapped = instrument(mock_async_anthropic_client, start_server=False)
+    assert isinstance(wrapped.messages, InstrumentedAsyncMessages)
+
+
+def test_detects_async_openai_client(mock_async_openai_client):
+    wrapped = instrument(mock_async_openai_client, start_server=False)
+    assert isinstance(wrapped.chat.completions, InstrumentedAsyncChatCompletion)
+
+
+@pytest.mark.asyncio
+async def test_async_anthropic_messages_create_delegates(mock_async_anthropic_client):
+    wrapped = instrument(mock_async_anthropic_client, start_server=False)
+    await wrapped.messages.create(model=ANTHROPIC_MODEL, max_tokens=1024, messages=[])
+    mock_async_anthropic_client.messages.create.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_async_openai_chat_completions_create_delegates(mock_async_openai_client):
+    wrapped = instrument(mock_async_openai_client, start_server=False)
+    await wrapped.chat.completions.create(model=OPENAI_MODEL, messages=[])
+    mock_async_openai_client.chat.completions.create.assert_called_once()
+
+
+def test_async_anthropic_proxies_attributes(mock_async_anthropic_client):
+    mock_async_anthropic_client.api_key = "sk-test-async"
+    assert instrument(mock_async_anthropic_client, start_server=False).api_key == "sk-test-async"
+
+
+def test_async_openai_proxies_attributes(mock_async_openai_client):
+    mock_async_openai_client.api_key = "sk-test-async"
+    assert instrument(mock_async_openai_client, start_server=False).api_key == "sk-test-async"
