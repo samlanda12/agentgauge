@@ -154,14 +154,12 @@ def test_detects_async_openai_client(mock_async_openai_client):
     assert isinstance(wrapped.chat.completions, InstrumentedAsyncChatCompletion)
 
 
-@pytest.mark.asyncio
 async def test_async_anthropic_messages_create_delegates(mock_async_anthropic_client):
     wrapped = instrument(mock_async_anthropic_client, start_server=False)
     await wrapped.messages.create(model=ANTHROPIC_MODEL, max_tokens=1024, messages=[])
     mock_async_anthropic_client.messages.create.assert_called_once()
 
 
-@pytest.mark.asyncio
 async def test_async_openai_chat_completions_create_delegates(mock_async_openai_client):
     wrapped = instrument(mock_async_openai_client, start_server=False)
     await wrapped.chat.completions.create(model=OPENAI_MODEL, messages=[])

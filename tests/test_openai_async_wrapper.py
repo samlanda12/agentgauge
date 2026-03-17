@@ -119,17 +119,14 @@ def _sample(metric_name, **labels):
 
 
 class TestAsyncCreateMetrics:
-    @pytest.mark.asyncio
     async def test_records_request_count(self, wrapped):
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         assert _sample("llm_requests_total", model=MODEL, method="create", status="ok") == 1.0
 
-    @pytest.mark.asyncio
     async def test_records_duration(self, wrapped):
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         assert _sample("llm_request_duration_seconds_count", model=MODEL, method="create") == 1.0
 
-    @pytest.mark.asyncio
     async def test_records_prompt_tokens(self, inner):
         inner.create = AsyncMock(return_value=FakeChatCompletion(
             usage=FakeUsage(prompt_tokens=200, completion_tokens=50)
@@ -138,7 +135,6 @@ class TestAsyncCreateMetrics:
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") == 200.0
 
-    @pytest.mark.asyncio
     async def test_records_completion_tokens(self, inner):
         inner.create = AsyncMock(return_value=FakeChatCompletion(
             usage=FakeUsage(prompt_tokens=200, completion_tokens=50)
@@ -147,7 +143,6 @@ class TestAsyncCreateMetrics:
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 50.0
 
-    @pytest.mark.asyncio
     async def test_multiple_calls_accumulate(self, wrapped):
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
@@ -155,24 +150,20 @@ class TestAsyncCreateMetrics:
 
 
 class TestAsyncCreateErrorHandling:
-    @pytest.mark.asyncio
     async def test_error_is_reraised(self, wrapped_with_error):
         with pytest.raises(RuntimeError, match="API down"):
             await wrapped_with_error.create(model=MODEL, max_tokens=1024, messages=[])
 
-    @pytest.mark.asyncio
     async def test_error_records_error_status(self, wrapped_with_error):
         with pytest.raises(RuntimeError):
             await wrapped_with_error.create(model=MODEL, max_tokens=1024, messages=[])
         assert _sample("llm_requests_total", model=MODEL, method="create", status="error") == 1.0
 
-    @pytest.mark.asyncio
     async def test_error_still_records_duration(self, wrapped_with_error):
         with pytest.raises(RuntimeError):
             await wrapped_with_error.create(model=MODEL, max_tokens=1024, messages=[])
         assert _sample("llm_request_duration_seconds_count", model=MODEL, method="create") == 1.0
 
-    @pytest.mark.asyncio
     async def test_active_requests_returns_to_zero_on_error(self, wrapped_with_error):
         with pytest.raises(RuntimeError):
             await wrapped_with_error.create(model=MODEL, max_tokens=1024, messages=[])
@@ -180,7 +171,6 @@ class TestAsyncCreateErrorHandling:
 
 
 class TestAsyncCreateDelegation:
-    @pytest.mark.asyncio
     async def test_passes_kwargs_to_inner_client(self, wrapped, inner):
         kwargs = {
             "model": MODEL,
@@ -190,7 +180,6 @@ class TestAsyncCreateDelegation:
         await wrapped.create(**kwargs)
         inner.create.assert_called_once_with(**kwargs)
 
-    @pytest.mark.asyncio
     async def test_returns_original_response(self, inner):
         expected = FakeChatCompletion(id="chatcmpl_123")
         inner.create = AsyncMock(return_value=expected)
@@ -205,7 +194,6 @@ class TestAsyncCreateDelegation:
 
 
 class TestAsyncToolCallTracking:
-    @pytest.mark.asyncio
     async def test_no_tool_calls_when_choices_is_empty(self, inner):
         inner.create = AsyncMock(return_value=FakeChatCompletion(choices=[]))
         await InstrumentedAsyncChatCompletion(inner).create(
@@ -213,7 +201,6 @@ class TestAsyncToolCallTracking:
         )
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="any_tool") is None
 
-    @pytest.mark.asyncio
     async def test_no_tool_calls_when_message_has_no_tool_calls(self, inner):
         inner.create = AsyncMock(return_value=FakeChatCompletion(
             choices=[FakeChoice(message=FakeMessage(tool_calls=None))]
@@ -223,7 +210,6 @@ class TestAsyncToolCallTracking:
         )
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="any_tool") is None
 
-    @pytest.mark.asyncio
     async def test_single_tool_call_is_recorded(self, inner):
         inner.create = AsyncMock(return_value=FakeChatCompletion(
             choices=[
@@ -239,7 +225,6 @@ class TestAsyncToolCallTracking:
         )
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="search_web") == 1.0
 
-    @pytest.mark.asyncio
     async def test_multiple_distinct_tool_calls_are_recorded(self, inner):
         inner.create = AsyncMock(return_value=FakeChatCompletion(
             choices=[
@@ -259,7 +244,6 @@ class TestAsyncToolCallTracking:
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="search_web") == 1.0
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="read_file") == 1.0
 
-    @pytest.mark.asyncio
     async def test_repeated_same_tool_accumulates(self, inner):
         inner.create = AsyncMock(return_value=FakeChatCompletion(
             choices=[
@@ -278,7 +262,6 @@ class TestAsyncToolCallTracking:
         )
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="search_web") == 2.0
 
-    @pytest.mark.asyncio
     async def test_multiple_choices_with_tool_calls(self, inner):
         inner.create = AsyncMock(return_value=FakeChatCompletion(
             choices=[
@@ -300,7 +283,6 @@ class TestAsyncToolCallTracking:
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="search_web") == 1.0
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="read_file") == 1.0
 
-    @pytest.mark.asyncio
     async def test_tool_calls_not_recorded_on_error(self, wrapped_with_error):
         inner = MagicMock()
         inner.create = AsyncMock(side_effect=RuntimeError("API down"))
@@ -311,7 +293,6 @@ class TestAsyncToolCallTracking:
 
 
 class TestAsyncStreamMetrics:
-    @pytest.mark.asyncio
     async def test_records_stream_request_count(self):
         stream = FakeAsyncStream(chunks=["chunk1", "chunk2"])
         inner = MagicMock()
@@ -327,7 +308,6 @@ class TestAsyncStreamMetrics:
         assert len(chunks) == 2
         assert _sample("llm_requests_total", model=MODEL, method="stream", status="ok") == 1.0
 
-    @pytest.mark.asyncio
     async def test_records_stream_duration(self):
         stream = FakeAsyncStream(chunks=["chunk1", "chunk2"])
         inner = MagicMock()
@@ -341,7 +321,6 @@ class TestAsyncStreamMetrics:
 
         assert _sample("llm_request_duration_seconds_count", model=MODEL, method="stream") == 1.0
 
-    @pytest.mark.asyncio
     async def test_yields_all_stream_chunks(self):
         c1, c2, c3 = FakeChunk(), FakeChunk(), FakeChunk()
         stream = FakeAsyncStream(chunks=[c1, c2, c3])
@@ -357,7 +336,6 @@ class TestAsyncStreamMetrics:
 
         assert result == [c1, c2, c3]
 
-    @pytest.mark.asyncio
     async def test_records_tokens_from_final_response(self, inner):
         stream = FakeAsyncStream(
             chunks=["chunk1"],
@@ -375,7 +353,6 @@ class TestAsyncStreamMetrics:
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") == 150.0
         assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 30.0
 
-    @pytest.mark.asyncio
     async def test_records_tool_calls_from_final_response(self, inner):
         stream = FakeAsyncStream(
             chunks=["chunk1"],
@@ -404,7 +381,6 @@ class TestAsyncStreamMetrics:
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="search_web") == 1.0
         assert _sample("llm_tool_calls_total", model=MODEL, tool_name="read_file") == 1.0
 
-    @pytest.mark.asyncio
     async def test_multiple_stream_calls_accumulate(self):
         stream1 = FakeAsyncStream(chunks=["c1"])
         stream2 = FakeAsyncStream(chunks=["c2"])
@@ -427,7 +403,6 @@ class TestAsyncStreamMetrics:
 
 
 class TestAsyncStreamErrorHandling:
-    @pytest.mark.asyncio
     async def test_error_during_stream_initialization(self):
         inner = MagicMock()
         inner.create.side_effect = RuntimeError("Stream init failed")
@@ -439,7 +414,6 @@ class TestAsyncStreamErrorHandling:
         assert _sample("llm_requests_total", model=MODEL, method="stream", status="error") == 1.0
         assert _sample("llm_active_requests", model=MODEL) is None
 
-    @pytest.mark.asyncio
     async def test_error_during_stream_iteration(self, inner):
         class FailingStream:
             async def __aenter__(self):
@@ -470,7 +444,6 @@ class TestAsyncStreamErrorHandling:
         assert _sample("llm_requests_total", model=MODEL, method="stream", status="error") == 1.0
         assert _sample("llm_active_requests", model=MODEL) == 0.0
 
-    @pytest.mark.asyncio
     async def test_tokens_not_recorded_on_error(self, inner):
         class FailingStream:
             async def __aenter__(self):
@@ -501,7 +474,6 @@ class TestAsyncStreamErrorHandling:
         assert _sample("llm_tokens_total", model=MODEL, token_type="output") is None
 
     @pytest.mark.filterwarnings("ignore::RuntimeWarning")
-    @pytest.mark.asyncio
     async def test_abandoned_stream_releases_active_request_gauge(self):
         stream = FakeAsyncStream(chunks=["chunk1"])
         inner = MagicMock()
@@ -515,7 +487,6 @@ class TestAsyncStreamErrorHandling:
 
 
 class TestAsyncStreamDelegation:
-    @pytest.mark.asyncio
     async def test_passes_kwargs_to_inner_create(self):
         stream = FakeAsyncStream(chunks=[])
         inner = MagicMock()
@@ -536,7 +507,6 @@ class TestAsyncStreamDelegation:
         expected_kwargs = {**kwargs, "stream": True, "stream_options": {"include_usage": True}}
         inner.create.assert_called_once_with(**expected_kwargs)
 
-    @pytest.mark.asyncio
     async def test_merges_existing_stream_options(self):
         stream = FakeAsyncStream(chunks=[])
         inner = MagicMock()

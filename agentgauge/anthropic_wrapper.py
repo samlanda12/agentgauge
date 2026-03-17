@@ -181,7 +181,6 @@ class InstrumentedStream:
 
     def __init__(self, stream_cm: Any, kwargs: dict[str, Any]) -> None:
         self._stream_cm = stream_cm
-        self._kwargs = kwargs
         self._model = kwargs.get("model", "unknown")
         self._start: Optional[float] = None
         self._status = "ok"
@@ -297,7 +296,6 @@ class InstrumentedAsyncStream:
 
     def __init__(self, stream_cm: Any, kwargs: dict[str, Any]) -> None:
         self._stream_cm = stream_cm
-        self._kwargs = kwargs
         self._model = kwargs.get("model", "unknown")
         self._start: Optional[float] = None
         self._status = "ok"

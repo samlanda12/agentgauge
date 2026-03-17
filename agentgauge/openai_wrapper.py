@@ -203,7 +203,6 @@ class InstrumentedOpenAIStream:
 
     def __init__(self, stream: Any, kwargs: dict[str, Any]) -> None:
         self._stream = stream
-        self._kwargs = kwargs
         self._model = kwargs.get("model", "unknown")
         self._start: Optional[float] = None
         self._status = "ok"
@@ -287,7 +286,6 @@ class InstrumentedAsyncOpenAIStream:
 
     def __init__(self, stream: Any, kwargs: dict[str, Any]) -> None:
         self._stream = stream
-        self._kwargs = kwargs
         self._model = kwargs.get("model", "unknown")
         self._start: Optional[float] = None
         self._status = "ok"
