@@ -525,3 +525,12 @@ class TestAsyncStreamDelegation:
 
         call_kwargs = inner.create.call_args[1]
 
+        # Ensure streaming is enforced
+        assert call_kwargs.get("stream") is True
+
+        # Ensure stream_options are merged correctly:
+        # - original custom_option is preserved
+        # - include_usage is injected
+        stream_options = call_kwargs.get("stream_options") or {}
+        assert stream_options.get("custom_option") is True
+        assert stream_options.get("include_usage") is True

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import inspect
 from typing import Any, AsyncIterator, Iterator, Optional
 
 from .metrics import (
@@ -99,7 +100,9 @@ class InstrumentedAsyncChatCompletion:
         kwargs["stream"] = True
 
         # Automatically inject stream_options to enable usage tracking
-        existing_options = kwargs.get("stream_options", {})
+        existing_options = kwargs.get("stream_options")
+        if existing_options is None or not isinstance(existing_options, dict):
+            existing_options = {}
         kwargs["stream_options"] = {**existing_options, "include_usage": True}
 
         try:
@@ -307,7 +310,9 @@ class InstrumentedAsyncOpenAIStream:
         self._record_metrics()
 
         if hasattr(self._stream, "close"):
-            await self._stream.close()
+            close_result = self._stream.close()
+            if inspect.isawaitable(close_result):
+                await close_result
 
         return False
 
