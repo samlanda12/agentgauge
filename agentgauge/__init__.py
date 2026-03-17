@@ -5,8 +5,8 @@ from typing import Any
 
 from prometheus_client import start_http_server
 
-from .anthropic_wrapper import InstrumentedMessages
-from .openai_wrapper import InstrumentedChatCompletion
+from .anthropic_wrapper import InstrumentedAsyncMessages, InstrumentedMessages
+from .openai_wrapper import InstrumentedAsyncChatCompletion, InstrumentedChatCompletion
 
 __version__ = "0.1.0"
 
@@ -60,6 +60,57 @@ class InstrumentedChatCompletionProxy:
         return getattr(self._chat, name)
 
 
+class InstrumentedAsyncAnthropicClient:
+    """Proxy around an AsyncAnthropic client that swaps in instrumented messages."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self._messages = InstrumentedAsyncMessages(client.messages)
+
+    @property
+    def messages(self) -> InstrumentedAsyncMessages:
+        return self._messages
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
+class InstrumentedAsyncOpenAIClient:
+    """Proxy around an AsyncOpenAI or async OpenAI-compatible client that swaps in instrumented chat completions."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+        self._chat = InstrumentedAsyncChatCompletionProxy(client.chat)
+
+    @property
+    def chat(self) -> InstrumentedAsyncChatCompletionProxy:
+        return self._chat
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._client, name)
+
+
+class InstrumentedAsyncChatCompletionProxy:
+    """Proxy for the chat.completions resource (async version)."""
+
+    def __init__(self, chat: Any) -> None:
+        self._chat = chat
+        self._completions = InstrumentedAsyncChatCompletion(chat.completions)
+
+    @property
+    def completions(self) -> InstrumentedAsyncChatCompletion:
+        return self._completions
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._chat, name)
+
+
+def _is_async_client(client: Any) -> bool:
+    """Check if client is an async client (AsyncAnthropic or AsyncOpenAI)."""
+    class_name = type(client).__name__
+    return class_name.startswith("Async")
+
+
 def _is_anthropic_client(client: Any) -> bool:
     """Check if client is an Anthropic client."""
     # Check class name and module first for clarity
@@ -93,13 +144,14 @@ def _is_openai_client(client: Any) -> bool:
 
 def instrument(
     client: Any, *, port: int = DEFAULT_PORT, start_server: bool = True
-) -> InstrumentedAnthropicClient | InstrumentedOpenAIClient:
+) -> InstrumentedAnthropicClient | InstrumentedOpenAIClient | InstrumentedAsyncAnthropicClient | InstrumentedAsyncOpenAIClient:
     """Wrap an LLM client with Prometheus instrumentation.
 
-    Supports Anthropic, OpenAI, and OpenAI-compatible clients.
+    Supports Anthropic, OpenAI, and OpenAI-compatible clients (both sync and async).
 
     Args:
-        client: An "anthropic.Anthropic", "openai.OpenAI", or OpenAI-compatible client instance.
+        client: An "anthropic.Anthropic", "openai.OpenAI", "anthropic.AsyncAnthropic",
+            "openai.AsyncOpenAI", or compatible client instance.
         port: Port for the "/metrics" HTTP endpoint. Defaults to 9464.
         start_server: Whether to auto-start the metrics HTTP server.
             Set to "False" in tests or when exposing metrics through
@@ -119,10 +171,16 @@ def instrument(
                 start_http_server(port)
                 _server_started = True
 
+    is_async = _is_async_client(client)
+
     # Check OpenAI first since it's more specific (chat.completions vs messages)
     if _is_openai_client(client):
+        if is_async:
+            return InstrumentedAsyncOpenAIClient(client)
         return InstrumentedOpenAIClient(client)
     elif _is_anthropic_client(client):
+        if is_async:
+            return InstrumentedAsyncAnthropicClient(client)
         return InstrumentedAnthropicClient(client)
     else:
         raise ValueError(

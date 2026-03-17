@@ -3,8 +3,8 @@
 Lightweight Prometheus metrics exporter for AI agent pipelines. Wraps LLM client SDKs to expose token usage, latency, and tool calls as native Prometheus metrics. No OpenTelemetry or other external infrastructure required.
 
 Supports:
-- **Anthropic** (`anthropic.Anthropic`)
-- **OpenAI** and **OpenAI-compatible providers** (OpenRouter, Together, Groq, etc.)
+- **Anthropic** (`anthropic.Anthropic`, `anthropic.AsyncAnthropic`)
+- **OpenAI** and **OpenAI-compatible providers** (`openai.OpenAI`, `openai.AsyncOpenAI`, OpenRouter, Together, Groq, etc.)
 
 ## Install
 
@@ -26,6 +26,21 @@ client = instrument(anthropic.Anthropic())
 response = client.messages.create(...)
 
 # Metrics available at http://localhost:9464/metrics
+```
+
+Async clients are supported with the same API:
+
+```python
+import anthropic
+from agentgauge import instrument
+
+client = instrument(anthropic.AsyncAnthropic())
+
+response = await client.messages.create(...)
+
+async with client.messages.stream(...) as stream:
+    async for event in stream:
+        ...
 ```
 
 ### OpenAI and OpenAI-compatible providers
@@ -50,6 +65,22 @@ client = instrument(
 response = client.chat.completions.create(...)
 
 # Metrics available at http://localhost:9464/metrics
+```
+
+Async clients are supported with the same API:
+
+```python
+from openai import AsyncOpenAI
+from agentgauge import instrument
+
+client = instrument(AsyncOpenAI())
+
+response = await client.chat.completions.create(...)
+
+stream = await client.chat.completions.stream(...)
+async with stream as s:
+    async for chunk in s:
+        ...
 ```
 
 ## Metrics
