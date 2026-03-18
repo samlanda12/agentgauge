@@ -132,14 +132,25 @@ class TestCreateMetrics:
         wrapped.create(model=MODEL, messages=[])
         assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 150.0
 
-    def test_cached_tokens_zero_when_not_present(self, inner):
+    def test_cached_tokens_zero_recorded_as_zero(self, inner):
+        """When cached_tokens is 0, the metric IS recorded with value 0 (via .inc(0))."""
         inner.create.return_value = FakeChatCompletion(
             usage=FakeUsage(prompt_tokens=200, completion_tokens=50)
         )
         wrapped = InstrumentedChatCompletion(inner)
         wrapped.create(model=MODEL, messages=[])
-        # The metric is not recorded when cached_tokens is 0
+        # .inc(0) still creates the label combination and sets it to 0
         assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 0.0
+
+    def test_cached_tokens_metric_not_recorded_when_prompt_tokens_details_missing(self, inner):
+        """When prompt_tokens_details is None, the metric is NOT recorded at all."""
+        inner.create.return_value = FakeChatCompletion(
+            usage=FakeUsage(prompt_tokens=200, completion_tokens=50, prompt_tokens_details=None)
+        )
+        wrapped = InstrumentedChatCompletion(inner)
+        wrapped.create(model=MODEL, messages=[])
+        # When prompt_tokens_details is None, the metric should not exist (returns None)
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") is None
 
 
 class TestCreateErrorHandling:

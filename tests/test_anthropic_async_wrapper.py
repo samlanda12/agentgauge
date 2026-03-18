@@ -148,13 +148,13 @@ class TestAsyncCreateMetrics:
         assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 200.0
 
     async def test_cache_tokens_zero_when_not_present(self, inner):
-        # When cache tokens are not in usage, they default to 0 but shouldn't record
+        # When cache tokens are not in usage, they default to 0 and we record a metric value of 0
         inner.create.return_value = FakeMessage(
             usage=FakeUsage(input_tokens=200, output_tokens=50, cache_creation_input_tokens=0, cache_read_input_tokens=0)
         )
         wrapped = InstrumentedAsyncMessages(inner)
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
-        # The metric is recorded with value 0, which is technically fine
+        # The metric is recorded with value 0, which is the expected behavior
         assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 0.0
 
 
