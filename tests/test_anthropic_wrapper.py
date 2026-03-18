@@ -37,6 +37,8 @@ class FakeStream:
 class FakeUsage:
     input_tokens: int = 100
     output_tokens: int = 25
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
 
 @dataclass
@@ -101,6 +103,45 @@ class TestCreateMetrics:
         wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         assert _sample("llm_requests_total", model=MODEL, method="create", status="ok") == 2.0
+
+    def test_records_cache_creation_tokens(self, inner):
+        inner.create.return_value = FakeMessage(
+            usage=FakeUsage(input_tokens=200, output_tokens=50, cache_creation_input_tokens=500)
+        )
+        wrapped = InstrumentedMessages(inner)
+        wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 500.0
+
+    def test_records_cache_read_tokens(self, inner):
+        inner.create.return_value = FakeMessage(
+            usage=FakeUsage(input_tokens=200, output_tokens=50, cache_read_input_tokens=300)
+        )
+        wrapped = InstrumentedMessages(inner)
+        wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 300.0
+
+    def test_records_both_cache_token_types(self, inner):
+        inner.create.return_value = FakeMessage(
+            usage=FakeUsage(
+                input_tokens=200,
+                output_tokens=50,
+                cache_creation_input_tokens=100,
+                cache_read_input_tokens=200
+            )
+        )
+        wrapped = InstrumentedMessages(inner)
+        wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 100.0
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 200.0
+
+    def test_cache_tokens_zero_when_not_present(self, inner):
+        inner.create.return_value = FakeMessage(
+            usage=FakeUsage(input_tokens=200, output_tokens=50, cache_creation_input_tokens=0, cache_read_input_tokens=0)
+        )
+        wrapped = InstrumentedMessages(inner)
+        wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        # The metric is recorded with value 0, which is technically fine
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 0.0
 
 
 class TestCreateErrorHandling:
@@ -233,6 +274,22 @@ class TestStreamMetrics:
             list(stream)
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") == 150.0
         assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 30.0
+
+    def test_records_cache_tokens_from_final_message(self, inner):
+        final_message = FakeMessage(
+            usage=FakeUsage(
+                input_tokens=150,
+                output_tokens=30,
+                cache_creation_input_tokens=100,
+                cache_read_input_tokens=250
+            )
+        )
+        inner.stream.return_value = FakeStream(events=["chunk"], final_message=final_message)
+        wrapped = InstrumentedMessages(inner)
+        with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as stream:
+            list(stream)
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 100.0
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 250.0
 
     def test_records_tool_calls_from_final_message(self, inner):
         final_message = FakeMessage(

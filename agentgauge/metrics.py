@@ -30,3 +30,9 @@ LLM_TOOL_CALLS_TOTAL = Counter(
     "Total number of tool calls made by the LLM",
     ["model", "tool_name"],
 )
+
+LLM_CACHE_TOKENS_TOTAL = Counter(
+    "llm_cache_tokens_total",
+    "Total number of cache tokens (prompt caching) consumed",
+    ["model", "cache_type"],
+)

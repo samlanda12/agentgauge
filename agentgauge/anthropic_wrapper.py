@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator, Iterator, Optional
 
 from .metrics import (
     LLM_ACTIVE_REQUESTS,
+    LLM_CACHE_TOKENS_TOTAL,
     LLM_REQUEST_DURATION_SECONDS,
     LLM_REQUESTS_TOTAL,
     LLM_TOKENS_TOTAL,
@@ -13,6 +14,29 @@ from .metrics import (
 )
 
 logger = logging.getLogger(__name__)
+
+def _record_anthropic_cache_tokens(usage: Any, model: str) -> None:
+    """Record Anthropic cache token metrics from a usage object.
+
+    Handles both cache_creation_input_tokens and cache_read_input_tokens
+    from Anthropic's usage response, with proper existence and type checking.
+
+    Args:
+        usage: The usage object from an Anthropic API response.
+        model: The model name for metric labeling.
+    """
+    if hasattr(usage, "cache_creation_input_tokens"):
+        cache_creation_tokens = usage.cache_creation_input_tokens
+        if isinstance(cache_creation_tokens, int):
+            LLM_CACHE_TOKENS_TOTAL.labels(model=model, cache_type="creation").inc(
+                cache_creation_tokens
+            )
+    if hasattr(usage, "cache_read_input_tokens"):
+        cache_read_tokens = usage.cache_read_input_tokens
+        if isinstance(cache_read_tokens, int):
+            LLM_CACHE_TOKENS_TOTAL.labels(model=model, cache_type="read").inc(
+                cache_read_tokens
+            )
 
 def _extract_tool_calls_anthropic(response: Any) -> list[str]:
     """Extract tool names from response content blocks.
@@ -65,6 +89,8 @@ class InstrumentedMessages:
 
             LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
             LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+
+            _record_anthropic_cache_tokens(response.usage, model)
 
         for tool_name in _extract_tool_calls_anthropic(response):
             LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
@@ -136,6 +162,8 @@ class InstrumentedAsyncMessages:
 
             LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
             LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+
+            _record_anthropic_cache_tokens(response.usage, model)
 
         for tool_name in _extract_tool_calls_anthropic(response):
             LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
@@ -264,6 +292,8 @@ class InstrumentedStream:
                             model=self._model, token_type="output"
                         ).inc(output_tokens)
 
+                        _record_anthropic_cache_tokens(final_message.usage, self._model)
+
                     for tool_name in _extract_tool_calls_anthropic(final_message):
                         LLM_TOOL_CALLS_TOTAL.labels(
                             model=self._model, tool_name=tool_name
@@ -382,6 +412,8 @@ class InstrumentedAsyncStream:
                         LLM_TOKENS_TOTAL.labels(
                             model=self._model, token_type="output"
                         ).inc(output_tokens)
+
+                        _record_anthropic_cache_tokens(final_message.usage, self._model)
 
                     for tool_name in _extract_tool_calls_anthropic(final_message):
                         LLM_TOOL_CALLS_TOTAL.labels(
