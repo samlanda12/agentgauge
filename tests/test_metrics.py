@@ -5,6 +5,7 @@ from prometheus_client import REGISTRY
 
 from agentgauge.metrics import (
     LLM_ACTIVE_REQUESTS,
+    LLM_CACHE_TOKENS_TOTAL,
     LLM_REQUEST_DURATION_SECONDS,
     LLM_REQUESTS_TOTAL,
     LLM_TOKENS_TOTAL,
@@ -19,6 +20,7 @@ MODEL = "claude-sonnet-4-5-20250929"
     "llm_tokens",
     "llm_active_requests",
     "llm_tool_calls",
+    "llm_cache_tokens",
 ])
 def test_metric_registered(name):
     metric_names = {m.name for m in REGISTRY.collect()}
@@ -30,6 +32,7 @@ def test_metric_registered(name):
     (LLM_TOKENS_TOTAL,            "llm_tokens",                ("model", "token_type")),
     (LLM_ACTIVE_REQUESTS,         "llm_active_requests",       ("model",)),
     (LLM_TOOL_CALLS_TOTAL,        "llm_tool_calls",            ("model", "tool_name")),
+    (LLM_CACHE_TOKENS_TOTAL,      "llm_cache_tokens",          ("model", "cache_type")),
 ])
 def test_metric_shape(metric, expected_name, expected_labels):
     assert metric._name == expected_name
@@ -73,3 +76,12 @@ def test_increment_tool_calls():
 
     assert REGISTRY.get_sample_value("llm_tool_calls_total", {"model": MODEL, "tool_name": "web_search"}) == 3.0
     assert REGISTRY.get_sample_value("llm_tool_calls_total", {"model": MODEL, "tool_name": "calculator"}) == 1.0
+
+
+def test_increment_cache_tokens():
+    """Test cache token counter for both creation and read cache types."""
+    LLM_CACHE_TOKENS_TOTAL.labels(model=MODEL, cache_type="creation").inc(500)
+    LLM_CACHE_TOKENS_TOTAL.labels(model=MODEL, cache_type="read").inc(250)
+
+    assert REGISTRY.get_sample_value("llm_cache_tokens_total", {"model": MODEL, "cache_type": "creation"}) == 500.0
+    assert REGISTRY.get_sample_value("llm_cache_tokens_total", {"model": MODEL, "cache_type": "read"}) == 250.0
