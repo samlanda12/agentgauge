@@ -8,6 +8,15 @@ from prometheus_client import start_http_server
 from .anthropic_wrapper import InstrumentedAsyncMessages, InstrumentedMessages
 from .openai_wrapper import InstrumentedAsyncChatCompletion, InstrumentedChatCompletion
 
+__all__ = ["instrument"]
+
+try:
+    from .langchain_callback import AgentGaugeCallbackHandler
+
+    __all__.append("AgentGaugeCallbackHandler")
+except ImportError:
+    pass
+
 __version__ = "0.1.0"
 
 _server_started = False
