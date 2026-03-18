@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator, Iterator, Optional
 
 from .metrics import (
     LLM_ACTIVE_REQUESTS,
+    LLM_CACHE_TOKENS_TOTAL,
     LLM_REQUEST_DURATION_SECONDS,
     LLM_REQUESTS_TOTAL,
     LLM_TOKENS_TOTAL,
@@ -68,6 +69,14 @@ class InstrumentedAsyncChatCompletion:
 
             LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
             LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+
+            # Track cache tokens for prompt caching
+            if hasattr(response.usage, "prompt_tokens_details") and response.usage.prompt_tokens_details is not None:
+                cached_tokens = getattr(response.usage.prompt_tokens_details, "cached_tokens", None)
+                if isinstance(cached_tokens, int):
+                    LLM_CACHE_TOKENS_TOTAL.labels(
+                        model=model, cache_type="read"
+                    ).inc(cached_tokens)
 
         for tool_name in _extract_tool_calls_openai(response):
             LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
@@ -151,6 +160,13 @@ class InstrumentedChatCompletion:
 
             LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
             LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+
+            if hasattr(response.usage, "prompt_tokens_details") and response.usage.prompt_tokens_details is not None:
+                cached_tokens = getattr(response.usage.prompt_tokens_details, "cached_tokens", None)
+                if isinstance(cached_tokens, int):
+                    LLM_CACHE_TOKENS_TOTAL.labels(
+                        model=model, cache_type="read"
+                    ).inc(cached_tokens)
 
         for tool_name in _extract_tool_calls_openai(response):
             LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
@@ -271,6 +287,13 @@ class InstrumentedOpenAIStream:
                         model=self._model, token_type="output"
                     ).inc(output_tokens)
 
+                    if hasattr(self._stream.usage, "prompt_tokens_details") and self._stream.usage.prompt_tokens_details is not None:
+                        cached_tokens = getattr(self._stream.usage.prompt_tokens_details, "cached_tokens", None)
+                        if isinstance(cached_tokens, int):
+                            LLM_CACHE_TOKENS_TOTAL.labels(
+                                model=self._model, cache_type="read"
+                            ).inc(cached_tokens)
+
                 # Check for tool calls in the stream object
                 for tool_name in _extract_tool_calls_openai(self._stream):
                     LLM_TOOL_CALLS_TOTAL.labels(
@@ -358,6 +381,13 @@ class InstrumentedAsyncOpenAIStream:
                     LLM_TOKENS_TOTAL.labels(
                         model=self._model, token_type="output"
                     ).inc(self._usage.completion_tokens)
+
+                    if hasattr(self._usage, "prompt_tokens_details") and self._usage.prompt_tokens_details is not None:
+                        cached_tokens = getattr(self._usage.prompt_tokens_details, "cached_tokens", None)
+                        if isinstance(cached_tokens, int):
+                            LLM_CACHE_TOKENS_TOTAL.labels(
+                                model=self._model, cache_type="read"
+                            ).inc(cached_tokens)
 
                 # Check for tool calls in the stream object
                 for tool_name in _extract_tool_calls_openai(self._stream):

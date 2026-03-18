@@ -13,9 +13,15 @@ MODEL = "gpt-4"
 
 
 @dataclass
+class FakePromptTokensDetails:
+    cached_tokens: int = 0
+
+
+@dataclass
 class FakeUsage:
     prompt_tokens: int = 100
     completion_tokens: int = 25
+    prompt_tokens_details: FakePromptTokensDetails = field(default_factory=FakePromptTokensDetails)
 
 
 @dataclass
@@ -147,6 +153,27 @@ class TestAsyncCreateMetrics:
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         assert _sample("llm_requests_total", model=MODEL, method="create", status="ok") == 2.0
+
+    async def test_records_cached_tokens(self, inner):
+        inner.create = AsyncMock(return_value=FakeChatCompletion(
+            usage=FakeUsage(
+                prompt_tokens=200,
+                completion_tokens=50,
+                prompt_tokens_details=FakePromptTokensDetails(cached_tokens=150)
+            )
+        ))
+        wrapped = InstrumentedAsyncChatCompletion(inner)
+        await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 150.0
+
+    async def test_cached_tokens_zero_when_not_present(self, inner):
+        inner.create = AsyncMock(return_value=FakeChatCompletion(
+            usage=FakeUsage(prompt_tokens=200, completion_tokens=50)
+        ))
+        wrapped = InstrumentedAsyncChatCompletion(inner)
+        await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        # The metric is recorded with value 0
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 0.0
 
 
 class TestAsyncCreateErrorHandling:
