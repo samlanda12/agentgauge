@@ -6,6 +6,7 @@ from typing import Any, AsyncIterator, Iterator, Optional
 
 from .metrics import (
     LLM_ACTIVE_REQUESTS,
+    LLM_CACHE_TOKENS_TOTAL,
     LLM_REQUEST_DURATION_SECONDS,
     LLM_REQUESTS_TOTAL,
     LLM_TOKENS_TOTAL,
@@ -65,6 +66,20 @@ class InstrumentedMessages:
 
             LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
             LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+
+            # Track cache tokens for prompt caching
+            if hasattr(response.usage, "cache_creation_input_tokens"):
+                cache_creation_tokens = response.usage.cache_creation_input_tokens
+                if isinstance(cache_creation_tokens, int):
+                    LLM_CACHE_TOKENS_TOTAL.labels(
+                        model=model, cache_type="creation"
+                    ).inc(cache_creation_tokens)
+            if hasattr(response.usage, "cache_read_input_tokens"):
+                cache_read_tokens = response.usage.cache_read_input_tokens
+                if isinstance(cache_read_tokens, int):
+                    LLM_CACHE_TOKENS_TOTAL.labels(
+                        model=model, cache_type="read"
+                    ).inc(cache_read_tokens)
 
         for tool_name in _extract_tool_calls_anthropic(response):
             LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
@@ -136,6 +151,19 @@ class InstrumentedAsyncMessages:
 
             LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
             LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+
+            if hasattr(response.usage, "cache_creation_input_tokens"):
+                cache_creation_tokens = response.usage.cache_creation_input_tokens
+                if isinstance(cache_creation_tokens, int):
+                    LLM_CACHE_TOKENS_TOTAL.labels(
+                        model=model, cache_type="creation"
+                    ).inc(cache_creation_tokens)
+            if hasattr(response.usage, "cache_read_input_tokens"):
+                cache_read_tokens = response.usage.cache_read_input_tokens
+                if isinstance(cache_read_tokens, int):
+                    LLM_CACHE_TOKENS_TOTAL.labels(
+                        model=model, cache_type="read"
+                    ).inc(cache_read_tokens)
 
         for tool_name in _extract_tool_calls_anthropic(response):
             LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
@@ -264,6 +292,19 @@ class InstrumentedStream:
                             model=self._model, token_type="output"
                         ).inc(output_tokens)
 
+                        if hasattr(final_message.usage, "cache_creation_input_tokens"):
+                            cache_creation_tokens = final_message.usage.cache_creation_input_tokens
+                            if isinstance(cache_creation_tokens, int):
+                                LLM_CACHE_TOKENS_TOTAL.labels(
+                                    model=self._model, cache_type="creation"
+                                ).inc(cache_creation_tokens)
+                        if hasattr(final_message.usage, "cache_read_input_tokens"):
+                            cache_read_tokens = final_message.usage.cache_read_input_tokens
+                            if isinstance(cache_read_tokens, int):
+                                LLM_CACHE_TOKENS_TOTAL.labels(
+                                    model=self._model, cache_type="read"
+                                ).inc(cache_read_tokens)
+
                     for tool_name in _extract_tool_calls_anthropic(final_message):
                         LLM_TOOL_CALLS_TOTAL.labels(
                             model=self._model, tool_name=tool_name
@@ -382,6 +423,19 @@ class InstrumentedAsyncStream:
                         LLM_TOKENS_TOTAL.labels(
                             model=self._model, token_type="output"
                         ).inc(output_tokens)
+
+                        if hasattr(final_message.usage, "cache_creation_input_tokens"):
+                            cache_creation_tokens = final_message.usage.cache_creation_input_tokens
+                            if isinstance(cache_creation_tokens, int):
+                                LLM_CACHE_TOKENS_TOTAL.labels(
+                                    model=self._model, cache_type="creation"
+                                ).inc(cache_creation_tokens)
+                        if hasattr(final_message.usage, "cache_read_input_tokens"):
+                            cache_read_tokens = final_message.usage.cache_read_input_tokens
+                            if isinstance(cache_read_tokens, int):
+                                LLM_CACHE_TOKENS_TOTAL.labels(
+                                    model=self._model, cache_type="read"
+                                ).inc(cache_read_tokens)
 
                     for tool_name in _extract_tool_calls_anthropic(final_message):
                         LLM_TOOL_CALLS_TOTAL.labels(

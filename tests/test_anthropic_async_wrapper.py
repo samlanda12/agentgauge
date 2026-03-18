@@ -50,6 +50,8 @@ class FakeAsyncStream:
 class FakeUsage:
     input_tokens: int = 100
     output_tokens: int = 25
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
 
 
 @dataclass
@@ -114,6 +116,46 @@ class TestAsyncCreateMetrics:
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
         assert _sample("llm_requests_total", model=MODEL, method="create", status="ok") == 2.0
+
+    async def test_records_cache_creation_tokens(self, inner):
+        inner.create.return_value = FakeMessage(
+            usage=FakeUsage(input_tokens=200, output_tokens=50, cache_creation_input_tokens=500)
+        )
+        wrapped = InstrumentedAsyncMessages(inner)
+        await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 500.0
+
+    async def test_records_cache_read_tokens(self, inner):
+        inner.create.return_value = FakeMessage(
+            usage=FakeUsage(input_tokens=200, output_tokens=50, cache_read_input_tokens=300)
+        )
+        wrapped = InstrumentedAsyncMessages(inner)
+        await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 300.0
+
+    async def test_records_both_cache_token_types(self, inner):
+        inner.create.return_value = FakeMessage(
+            usage=FakeUsage(
+                input_tokens=200,
+                output_tokens=50,
+                cache_creation_input_tokens=100,
+                cache_read_input_tokens=200
+            )
+        )
+        wrapped = InstrumentedAsyncMessages(inner)
+        await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 100.0
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 200.0
+
+    async def test_cache_tokens_zero_when_not_present(self, inner):
+        # When cache tokens are not in usage, they default to 0 but shouldn't record
+        inner.create.return_value = FakeMessage(
+            usage=FakeUsage(input_tokens=200, output_tokens=50, cache_creation_input_tokens=0, cache_read_input_tokens=0)
+        )
+        wrapped = InstrumentedAsyncMessages(inner)
+        await wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        # The metric is recorded with value 0, which is technically fine
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 0.0
 
 
 class TestAsyncCreateErrorHandling:
@@ -269,6 +311,26 @@ class TestAsyncStreamMetrics:
 
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") == 150.0
         assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 30.0
+
+    async def test_records_cache_tokens_from_final_message(self, inner):
+        final_message = FakeMessage(
+            usage=FakeUsage(
+                input_tokens=150,
+                output_tokens=30,
+                cache_creation_input_tokens=100,
+                cache_read_input_tokens=250
+            )
+        )
+        stream = FakeAsyncStream(events=["event1"], final_message=final_message)
+        inner.stream.return_value = stream
+
+        wrapped = InstrumentedAsyncMessages(inner)
+        async with wrapped.stream(model=MODEL, max_tokens=1024, messages=[]) as s:
+            async for event in s:
+                pass
+
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 100.0
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 250.0
 
     async def test_records_tool_calls_from_final_message(self, inner):
         final_message = FakeMessage(
