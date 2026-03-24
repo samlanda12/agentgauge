@@ -5,6 +5,7 @@ Lightweight Prometheus metrics exporter for AI agent pipelines. Wraps LLM client
 Supports:
 - **Anthropic** (`anthropic.Anthropic`, `anthropic.AsyncAnthropic`)
 - **OpenAI** and **OpenAI-compatible providers** (`openai.OpenAI`, `openai.AsyncOpenAI`, OpenRouter, Together, Groq, etc.)
+- **LangChain** and **LangGraph** (via callback handler; no client wrapping)
 
 ## Install
 
@@ -82,6 +83,44 @@ async with stream as s:
     async for chunk in s:
         ...
 ```
+
+### LangChain
+
+```bash
+pip install agentgauge[langchain]
+```
+
+```python
+from langchain_openai import ChatOpenAI
+from agentgauge import AgentGaugeCallbackHandler
+
+handler = AgentGaugeCallbackHandler()
+
+llm = ChatOpenAI(model="gpt-4o", callbacks=[handler])
+
+response = llm.invoke("Hello!")
+```
+
+### LangGraph
+
+Uses the same callback handler as LangChain. Just pass it via `RunnableConfig` when invoking the agent. This ensures it propagates to all graph nodes; LLM calls and tool calls. Attaching only to the LLM constructor will miss tool-node callbacks.
+
+```python
+from langchain_openai import ChatOpenAI
+from langchain_core.runnables import RunnableConfig
+from langgraph.prebuilt import create_react_agent
+from agentgauge import AgentGaugeCallbackHandler
+
+handler = AgentGaugeCallbackHandler()
+
+llm = ChatOpenAI(model="gpt-4o")
+agent = create_react_agent(llm, tools=[...])
+
+config = RunnableConfig(callbacks=[handler])
+result = agent.invoke({"messages": [...]}, config=config)
+```
+
+> **Note:** Tool call metrics are labeled with `model="unknown"` because LangChain's callback system doesn't associate tool invocations with a specific LLM at the hook level. If you need model-associated tool metrics, you can correlate using timestamps or implement custom tracking in your agent.
 
 ## Metrics
 
