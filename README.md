@@ -87,7 +87,7 @@ async with stream as s:
 ### LangChain
 
 ```bash
-pip install agentgauge[langchain]
+pip install agentgauge[langchain] langchain-openai
 ```
 
 ```python
@@ -104,6 +104,10 @@ response = llm.invoke("Hello!")
 ### LangGraph
 
 Uses the same callback handler as LangChain. Just pass it via `RunnableConfig` when invoking the agent. This ensures it propagates to all graph nodes; LLM calls and tool calls. Attaching only to the LLM constructor will miss tool-node callbacks.
+
+```bash
+pip install agentgauge[langchain] langchain-openai langgraph
+```
 
 ```python
 from langchain_openai import ChatOpenAI

@@ -8,7 +8,7 @@ import pytest
 
 pytest.importorskip("langchain_core")
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 from uuid import uuid4
 
 from langchain_core.outputs import LLMResult, ChatGeneration
