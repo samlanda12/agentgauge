@@ -443,9 +443,10 @@ class TestStreamDelegation:
 
     def test_handles_stream_without_final_response(self, inner):
         # Stream with no usage chunks; tokens should not be recorded
-        inner.create.return_value = FakeStream(chunks=[FakeChunk(), FakeChunk()])
+        chunks = [FakeChunk(), FakeChunk()]
+        inner.create.return_value = FakeStream(chunks=chunks)
         wrapped = InstrumentedChatCompletion(inner)
         with wrapped.stream(model=MODEL, messages=[]) as stream:
-            list(stream)
+            result = list(stream)
+        assert result == chunks  # Verify wrapper passes through chunks correctly
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") is None
-

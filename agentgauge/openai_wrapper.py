@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 import inspect
 from typing import Any, AsyncIterator, Iterator, Optional
@@ -12,6 +13,8 @@ from .metrics import (
     LLM_TOKENS_TOTAL,
     LLM_TOOL_CALLS_TOTAL,
 )
+
+logger = logging.getLogger(__name__)
 
 def _record_openai_cache_tokens(usage: Any, model: str) -> None:
     """Record OpenAI cache token metrics from a usage object.
@@ -240,7 +243,9 @@ class InstrumentedOpenAIStream:
         LLM_ACTIVE_REQUESTS.labels(model=self._model).inc()
         self._entered = True
         try:
-            self._stream.__enter__()
+            entered_stream = self._stream.__enter__()
+            if entered_stream is not None:
+                self._stream = entered_stream
             return self
         except Exception:
             self._status = "error"
@@ -254,8 +259,23 @@ class InstrumentedOpenAIStream:
 
         try:
             self._stream.__exit__(exc_type, exc_val, exc_tb)
-        except Exception:
-            pass
+        except Exception as e:
+            logger.exception(
+                "Exception during stream cleanup for model %s: %s",
+                self._model,
+                e,
+            )
+
+        # Fallback: close if available
+        if hasattr(self._stream, "close"):
+            try:
+                self._stream.close()
+            except Exception as e:
+                logger.exception(
+                    "Exception closing stream for model %s: %s",
+                    self._model,
+                    e,
+                )
 
         self._record_metrics()
 
