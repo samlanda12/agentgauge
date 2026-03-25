@@ -131,7 +131,10 @@ result = agent.invoke({"messages": [...]}, config=config)
 | `llm_tokens_total` | Counter | `model`, `token_type` |
 | `llm_active_requests` | Gauge | `model` |
 | `llm_tool_calls_total` | Counter | `model`, `tool_name` |
+| `llm_tool_duration_seconds` | Histogram | `tool_name` |
 | `llm_cache_tokens_total` | Counter | `model`, `cache_type` |
+
+> **Note:** `llm_tool_duration_seconds` is only available for LangChain/LangGraph workflows where tool execution is tracked via callbacks. Direct SDK wrappers (Anthropic, OpenAI) only see tool calls in the LLM response, not the actual tool execution.
 
 ## Common Queries
 

@@ -19,6 +19,7 @@ from .metrics import (
     LLM_REQUESTS_TOTAL,
     LLM_TOKENS_TOTAL,
     LLM_TOOL_CALLS_TOTAL,
+    LLM_TOOL_DURATION_SECONDS,
 )
 
 
@@ -86,6 +87,8 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         super().__init__()
         self._request_starts: Dict[str, float] = {}
         self._model_names: Dict[str, str] = {}
+        self._tool_starts: Dict[str, float] = {}
+        self._tool_names: Dict[str, str] = {}
 
     def on_llm_start(
         self,
@@ -186,4 +189,45 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         model at this hook level.
         """
         tool_name = (serialized or {}).get("name", "unknown")
+        key = str(run_id)
+        self._tool_starts[key] = time.monotonic()
+        self._tool_names[key] = tool_name
         LLM_TOOL_CALLS_TOTAL.labels(model="unknown", tool_name=tool_name).inc()
+
+    def on_tool_end(
+        self,
+        output: Any,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Called when an agent tool finishes successfully."""
+        key = str(run_id)
+        tool_name = self._tool_names.pop(key, None)
+        if tool_name is None:
+            return
+
+        if key in self._tool_starts:
+            duration = time.monotonic() - self._tool_starts.pop(key)
+            LLM_TOOL_DURATION_SECONDS.labels(tool_name=tool_name).observe(duration)
+
+    def on_tool_error(
+        self,
+        error: BaseException,
+        *,
+        run_id: UUID,
+        parent_run_id: Optional[UUID] = None,
+        tags: Optional[List[str]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Called when an agent tool raises an error."""
+        key = str(run_id)
+        tool_name = self._tool_names.pop(key, None)
+        if tool_name is None:
+            return
+
+        if key in self._tool_starts:
+            duration = time.monotonic() - self._tool_starts.pop(key)
+            LLM_TOOL_DURATION_SECONDS.labels(tool_name=tool_name).observe(duration)

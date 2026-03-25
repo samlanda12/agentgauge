@@ -259,6 +259,62 @@ class TestToolCallTracking:
         handler.on_tool_start({}, "input", run_id=uuid4())
         assert _sample("llm_tool_calls_total", model="unknown", tool_name="unknown") == 1.0
 
+    def test_tracks_start_time(self, handler):
+        run_id = uuid4()
+        handler.on_tool_start({"name": "web_search"}, "query", run_id=run_id)
+        assert str(run_id) in handler._tool_starts
+        assert str(run_id) in handler._tool_names
+
+    def test_tracks_tool_name(self, handler):
+        run_id = uuid4()
+        handler.on_tool_start({"name": "calculator"}, "1+1", run_id=run_id)
+        assert handler._tool_names[str(run_id)] == "calculator"
+
+
+# Tool duration tracking
+
+class TestToolDurationTracking:
+    def test_on_tool_end_records_duration(self, handler):
+        run_id = uuid4()
+        handler.on_tool_start({"name": "web_search"}, "query", run_id=run_id)
+        handler.on_tool_end("search results", run_id=run_id)
+        assert _sample("llm_tool_duration_seconds_count", tool_name="web_search") == 1.0
+
+    def test_on_tool_error_records_duration(self, handler):
+        run_id = uuid4()
+        handler.on_tool_start({"name": "calculator"}, "1/0", run_id=run_id)
+        handler.on_tool_error(RuntimeError("division by zero"), run_id=run_id)
+        assert _sample("llm_tool_duration_seconds_count", tool_name="calculator") == 1.0
+
+    def test_cleans_up_tracking_state_on_end(self, handler):
+        run_id = uuid4()
+        handler.on_tool_start({"name": "web_search"}, "query", run_id=run_id)
+        handler.on_tool_end("results", run_id=run_id)
+        assert str(run_id) not in handler._tool_starts
+        assert str(run_id) not in handler._tool_names
+
+    def test_cleans_up_tracking_state_on_error(self, handler):
+        run_id = uuid4()
+        handler.on_tool_start({"name": "web_search"}, "query", run_id=run_id)
+        handler.on_tool_error(RuntimeError("fail"), run_id=run_id)
+        assert str(run_id) not in handler._tool_starts
+        assert str(run_id) not in handler._tool_names
+
+    def test_orphaned_tool_end_is_safe(self, handler):
+        handler.on_tool_end("result", run_id=uuid4())
+        assert _sample("llm_tool_duration_seconds_count", tool_name="unknown") is None
+
+    def test_orphaned_tool_error_is_safe(self, handler):
+        handler.on_tool_error(RuntimeError("fail"), run_id=uuid4())
+        assert _sample("llm_tool_duration_seconds_count", tool_name="unknown") is None
+
+    def test_multiple_tool_calls_accumulate_duration(self, handler):
+        for _ in range(3):
+            run_id = uuid4()
+            handler.on_tool_start({"name": "web_search"}, "query", run_id=run_id)
+            handler.on_tool_end("results", run_id=run_id)
+        assert _sample("llm_tool_duration_seconds_count", tool_name="web_search") == 3.0
+
 # Model name extraction
 
 class TestModelExtraction:
