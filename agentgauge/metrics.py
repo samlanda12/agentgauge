@@ -36,3 +36,10 @@ LLM_CACHE_TOKENS_TOTAL = Counter(
     "Total number of cache tokens (prompt caching) consumed",
     ["model", "cache_type"],
 )
+
+LLM_TOOL_DURATION_SECONDS = Histogram(
+    "llm_tool_duration_seconds",
+    "Tool execution duration in seconds",
+    ["tool_name"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0, 30.0, 60.0),
+)
