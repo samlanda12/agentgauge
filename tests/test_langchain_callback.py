@@ -6,7 +6,8 @@ import pytest
 
 pytest.importorskip("langchain_core")
 
-from langchain_core.outputs import LLMResult  # noqa: E402
+from langchain_core.messages import AIMessage  # noqa: E402
+from langchain_core.outputs import ChatGeneration, LLMResult  # noqa: E402
 
 from agentgauge.langchain_callback import AgentGaugeCallbackHandler  # noqa: E402
 
@@ -215,6 +216,29 @@ class TestTokenTracking:
             run_id=run_id,
         )
         assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 30.0
+
+    def test_streaming_tokens_from_usage_metadata(self, handler):
+        """When llm_output is empty (streaming), tokens come from message.usage_metadata."""
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        message = AIMessage(content="Hi!", usage_metadata={"input_tokens": 20, "output_tokens": 8, "total_tokens": 28})
+        result = LLMResult(generations=[[ChatGeneration(text="Hi!", message=message)]], llm_output={})
+        handler.on_llm_end(result, run_id=run_id)
+        assert _sample("llm_tokens_total", model=MODEL, token_type="input") == 20.0
+        assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 8.0
+
+    def test_llm_output_takes_precedence_over_usage_metadata(self, handler):
+        """When llm_output has token data, usage_metadata is not consulted."""
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        message = AIMessage(content="Hi!", usage_metadata={"input_tokens": 99, "output_tokens": 99, "total_tokens": 198})
+        result = LLMResult(
+            generations=[[ChatGeneration(text="Hi!", message=message)]],
+            llm_output={"token_usage": {"prompt_tokens": 10, "completion_tokens": 5}},
+        )
+        handler.on_llm_end(result, run_id=run_id)
+        assert _sample("llm_tokens_total", model=MODEL, token_type="input") == 10.0
+        assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 5.0
 
     def test_missing_token_usage_does_not_record(self, handler):
         run_id = uuid4()

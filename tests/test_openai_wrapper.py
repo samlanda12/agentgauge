@@ -15,11 +15,16 @@ MODEL = "gpt-4-turbo"
 class FakeStream:
     """Mock stream object that yields chunks and optionally provides final response."""
 
-    def __init__(self, chunks=None, final_response=None, usage=None, choices=None):
+    def __init__(self, chunks=None, final_response=None, choices=None):
         self._chunks = chunks or []
         self._final_response = final_response
-        self.usage = usage
         self.choices = choices
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        pass
 
     def __iter__(self):
         return iter(self._chunks)
@@ -40,6 +45,12 @@ class FakeUsage:
     prompt_tokens: int = 100
     completion_tokens: int = 25
     prompt_tokens_details: FakePromptTokensDetails = field(default_factory=FakePromptTokensDetails)
+
+
+@dataclass
+class FakeChunk:
+    """A single streaming chunk, optionally carrying a usage payload."""
+    usage: Optional[FakeUsage] = None
 
 
 @dataclass
@@ -300,13 +311,12 @@ class TestStreamMetrics:
             result = list(stream)
         assert result == chunks
 
-    def test_records_tokens_from_final_response(self, inner):
-        # OpenAI streams with stream_options can include usage in the stream object itself
-        stream_with_usage = FakeStream(
-            chunks=["chunk"],
-            usage=FakeUsage(prompt_tokens=175, completion_tokens=40)
-        )
-        inner.create.return_value = stream_with_usage
+    def test_records_tokens_from_usage_chunk(self, inner):
+        # OpenAI sends usage in the final chunk when stream_options={"include_usage": True}
+        inner.create.return_value = FakeStream(chunks=[
+            FakeChunk(),
+            FakeChunk(usage=FakeUsage(prompt_tokens=175, completion_tokens=40)),
+        ])
         wrapped = InstrumentedChatCompletion(inner)
         with wrapped.stream(model=MODEL, messages=[]) as stream:
             list(stream)
@@ -355,10 +365,10 @@ class TestStreamErrorHandling:
 
     def test_error_during_stream_iteration(self, inner):
         def failing_generator():
-            yield "chunk1"
+            yield FakeChunk()
             raise RuntimeError("Stream failed")
 
-        inner.create.return_value = failing_generator()
+        inner.create.return_value = FakeStream(chunks=failing_generator())
         wrapped = InstrumentedChatCompletion(inner)
         with pytest.raises(RuntimeError, match="Stream failed"):
             with wrapped.stream(model=MODEL, messages=[]) as stream:
@@ -432,13 +442,11 @@ class TestStreamDelegation:
         inner.create.assert_called_once_with(**expected_kwargs)
 
     def test_handles_stream_without_final_response(self, inner):
-        # Stream without get_final_response method
-        inner.create.return_value = iter(["chunk1", "chunk2"])
+        # Stream with no usage chunks; tokens should not be recorded
+        chunks = [FakeChunk(), FakeChunk()]
+        inner.create.return_value = FakeStream(chunks=chunks)
         wrapped = InstrumentedChatCompletion(inner)
-        result = None
         with wrapped.stream(model=MODEL, messages=[]) as stream:
             result = list(stream)
-        assert result == ["chunk1", "chunk2"]
-        # Should not record tokens since no final response
+        assert result == chunks  # Verify wrapper passes through chunks correctly
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") is None
-

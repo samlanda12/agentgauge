@@ -70,8 +70,13 @@ def _extract_model(serialized: Optional[Dict[str, Any]], kwargs: Dict[str, Any])
 def _record_token_usage(result: LLMResult, model: str) -> None:
     """Record token usage from an LLMResult.
 
-    Handles both OpenAI-style ('token_usage') and Anthropic-style ('usage')
-    output formats found in 'LLMResult.llm_output'.
+    Checks three locations in order:
+    1. 'llm_output["token_usage"]': OpenAI non-streaming style.
+    2. 'llm_output["usage"]': Anthropic non-streaming style.
+    3. 'generations[0][0].message.usage_metadata': streaming fallback.
+       LangChain populates AIMessage.usage_metadata for streaming responses
+       from modern providers (ChatOpenAI, ChatAnthropic, etc.) when llm_output
+       is left empty.
     """
     llm_output = result.llm_output or {}
 
@@ -95,6 +100,21 @@ def _record_token_usage(result: LLMResult, model: str) -> None:
             LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
         if isinstance(output_tokens, int):
             LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+        return
+
+    # Streaming fallback: LangChain populates AIMessage.usage_metadata when llm_output is empty.
+    try:
+        gen = result.generations[0][0]
+        usage_metadata = getattr(getattr(gen, "message", None), "usage_metadata", None)
+        if usage_metadata:
+            input_tokens = usage_metadata.get("input_tokens")
+            output_tokens = usage_metadata.get("output_tokens")
+            if isinstance(input_tokens, int):
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
+            if isinstance(output_tokens, int):
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+    except (IndexError, AttributeError):
+        pass
 
 
 class AgentGaugeCallbackHandler(BaseCallbackHandler):

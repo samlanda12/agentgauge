@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 import inspect
 from typing import Any, AsyncIterator, Iterator, Optional
@@ -12,6 +13,8 @@ from .metrics import (
     LLM_TOKENS_TOTAL,
     LLM_TOOL_CALLS_TOTAL,
 )
+
+logger = logging.getLogger(__name__)
 
 def _record_openai_cache_tokens(usage: Any, model: str) -> None:
     """Record OpenAI cache token metrics from a usage object.
@@ -232,23 +235,49 @@ class InstrumentedOpenAIStream:
         self._start: Optional[float] = None
         self._status = "ok"
         self._entered = False
+        self._usage: Any = None  # captured from the final usage chunk during iteration
 
     def __enter__(self) -> "InstrumentedOpenAIStream":
         """Enter the stream context and start tracking metrics."""
         self._start = time.monotonic()
         LLM_ACTIVE_REQUESTS.labels(model=self._model).inc()
         self._entered = True
-        return self
+        try:
+            entered_stream = self._stream.__enter__()
+            if entered_stream is not None:
+                self._stream = entered_stream
+            return self
+        except Exception:
+            self._status = "error"
+            self._record_metrics()
+            raise
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         """Exit the stream context and record final metrics."""
         if exc_type is not None:
             self._status = "error"
 
-        self._record_metrics()
+        try:
+            self._stream.__exit__(exc_type, exc_val, exc_tb)
+        except Exception as e:
+            logger.exception(
+                "Exception during stream cleanup for model %s: %s",
+                self._model,
+                e,
+            )
 
+        # Fallback: close if available
         if hasattr(self._stream, "close"):
-            self._stream.close()
+            try:
+                self._stream.close()
+            except Exception as e:
+                logger.exception(
+                    "Exception closing stream for model %s: %s",
+                    self._model,
+                    e,
+                )
+
+        self._record_metrics()
 
         return False
 
@@ -259,6 +288,8 @@ class InstrumentedOpenAIStream:
 
         try:
             for chunk in self._stream:
+                if hasattr(chunk, "usage") and chunk.usage is not None:
+                    self._usage = chunk.usage
                 yield chunk
         except Exception:
             self._status = "error"
@@ -278,30 +309,23 @@ class InstrumentedOpenAIStream:
             model=self._model, method="stream"
         ).observe(duration)
 
-        # Try to extract token usage and tool calls from the stream object
         if self._status == "ok":
             try:
-                # OpenAI streams may include usage in the stream object with stream_options
-                if hasattr(self._stream, "usage") and self._stream.usage is not None:
-                    input_tokens = self._stream.usage.prompt_tokens
-                    output_tokens = self._stream.usage.completion_tokens
-
+                if self._usage is not None:
                     LLM_TOKENS_TOTAL.labels(
                         model=self._model, token_type="input"
-                    ).inc(input_tokens)
+                    ).inc(self._usage.prompt_tokens)
                     LLM_TOKENS_TOTAL.labels(
                         model=self._model, token_type="output"
-                    ).inc(output_tokens)
+                    ).inc(self._usage.completion_tokens)
 
-                    _record_openai_cache_tokens(self._stream.usage, self._model)
+                    _record_openai_cache_tokens(self._usage, self._model)
 
-                # Check for tool calls in the stream object
                 for tool_name in _extract_tool_calls_openai(self._stream):
                     LLM_TOOL_CALLS_TOTAL.labels(
                         model=self._model, tool_name=tool_name
                     ).inc()
             except Exception:
-                # If we can't get token usage or tool calls, just skip it
                 pass
 
 
