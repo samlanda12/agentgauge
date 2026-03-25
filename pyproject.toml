@@ -16,7 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.39"]
 openai = ["openai>=1.0"]
-langchain = ["langchain-core>=0.1", "langchain-openai>=0.1"]
+langchain = ["langchain-core>=0.1"]
 all = ["anthropic>=0.39", "openai>=1.0", "langchain-core>=0.1", "langchain-openai>=0.1", "langgraph>=0.1"]
 dev = [
     "pytest>=8.0",

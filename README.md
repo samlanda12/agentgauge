@@ -120,8 +120,6 @@ config = RunnableConfig(callbacks=[handler])
 result = agent.invoke({"messages": [...]}, config=config)
 ```
 
-> **Note:** Tool call metrics are labeled with `model="unknown"` because LangChain's callback system doesn't associate tool invocations with a specific LLM at the hook level. If you need model-associated tool metrics, you can correlate using timestamps or implement custom tracking in your agent.
-
 ## Metrics
 
 | Metric | Type | Labels |

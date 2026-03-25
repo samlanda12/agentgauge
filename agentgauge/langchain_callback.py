@@ -114,7 +114,7 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         self._model_names: Dict[str, str] = {}
         self._tool_starts: Dict[str, float] = {}
         self._tool_names: Dict[str, str] = {}
-        self._streaming_tokens: Dict[str, int] = {}
+        self._is_streaming: Dict[str, bool] = {}
 
     # Sync LLM callbacks
 
@@ -134,7 +134,7 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         key = str(run_id)
         self._request_starts[key] = time.monotonic()
         self._model_names[key] = model
-        self._streaming_tokens[key] = 0
+        self._is_streaming[key] = False
         LLM_ACTIVE_REQUESTS.labels(model=model).inc()
 
     def on_chat_model_start(
@@ -153,7 +153,7 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         key = str(run_id)
         self._request_starts[key] = time.monotonic()
         self._model_names[key] = model
-        self._streaming_tokens[key] = 0
+        self._is_streaming[key] = False
         LLM_ACTIVE_REQUESTS.labels(model=model).inc()
 
     def on_llm_new_token(
@@ -167,13 +167,12 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
     ) -> None:
         """Called when a new token is streamed from an LLM.
 
-        Tracks streaming token count for visibility into streaming progress.
-        The actual output token count is recorded in on_llm_end from the
-        final usage data, but this provides per-token visibility during streaming.
+        Marks the request as streaming so the method label can be set correctly
+        in on_llm_end.
         """
         key = str(run_id)
-        if key in self._streaming_tokens:
-            self._streaming_tokens[key] += 1
+        if key in self._is_streaming:
+            self._is_streaming[key] = True
 
     def on_llm_end(
         self,
@@ -190,14 +189,16 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         if model is None:
             return
 
-        self._streaming_tokens.pop(key, None)
+        is_streaming = self._is_streaming.pop(key, False)
 
         if key in self._request_starts:
             duration = time.monotonic() - self._request_starts.pop(key)
-            LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="invoke").observe(duration)
+            method = "stream" if is_streaming else "invoke"
+            LLM_REQUEST_DURATION_SECONDS.labels(model=model, method=method).observe(duration)
 
         LLM_ACTIVE_REQUESTS.labels(model=model).dec()
-        LLM_REQUESTS_TOTAL.labels(model=model, method="invoke", status="ok").inc()
+        method = "stream" if is_streaming else "invoke"
+        LLM_REQUESTS_TOTAL.labels(model=model, method=method, status="ok").inc()
         _record_token_usage(response, model)
 
     def on_llm_error(
@@ -215,14 +216,16 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         if model is None:
             return
 
-        self._streaming_tokens.pop(key, None)
+        is_streaming = self._is_streaming.pop(key, False)
 
         if key in self._request_starts:
             duration = time.monotonic() - self._request_starts.pop(key)
-            LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="invoke").observe(duration)
+            method = "stream" if is_streaming else "invoke"
+            LLM_REQUEST_DURATION_SECONDS.labels(model=model, method=method).observe(duration)
 
         LLM_ACTIVE_REQUESTS.labels(model=model).dec()
-        LLM_REQUESTS_TOTAL.labels(model=model, method="invoke", status="error").inc()
+        method = "stream" if is_streaming else "invoke"
+        LLM_REQUESTS_TOTAL.labels(model=model, method=method, status="error").inc()
 
     # Async LLM callbacks
 
@@ -339,15 +342,17 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
     ) -> None:
         """Called when an agent tool is invoked.
 
-        Tool calls are labeled with model="unknown" because the LangChain
-        callback system does not associate tool invocations with a specific
-        model at this hook level.
+        Tool calls inherit the model label from their parent LLM run when available.
+        If the parent LLM run is not tracked or has already completed, model defaults
+        to "unknown".
         """
         tool_name = (serialized or {}).get("name", "unknown")
         key = str(run_id)
         self._tool_starts[key] = time.monotonic()
         self._tool_names[key] = tool_name
-        LLM_TOOL_CALLS_TOTAL.labels(model="unknown", tool_name=tool_name).inc()
+        # Look up model from parent LLM run if available
+        model = self._model_names.get(str(parent_run_id), "unknown") if parent_run_id else "unknown"
+        LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
 
     def on_tool_end(
         self,

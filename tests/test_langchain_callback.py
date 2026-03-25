@@ -270,6 +270,34 @@ class TestToolCallTracking:
         handler.on_tool_start({"name": "calculator"}, "1+1", run_id=run_id)
         assert handler._tool_names[str(run_id)] == "calculator"
 
+    def test_tool_inherits_model_from_parent_run(self, handler):
+        """Tool calls should inherit model from parent LLM run when available."""
+        parent_run_id = uuid4()
+        tool_run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=parent_run_id, **_invocation_kwargs())
+        handler.on_tool_start(
+            {"name": "web_search"},
+            "query",
+            run_id=tool_run_id,
+            parent_run_id=parent_run_id,
+        )
+        assert _sample("llm_tool_calls_total", model=MODEL, tool_name="web_search") == 1.0
+
+    def test_tool_uses_unknown_without_parent_run(self, handler):
+        """Tool calls without parent_run_id should use model='unknown'."""
+        handler.on_tool_start({"name": "web_search"}, "query", run_id=uuid4())
+        assert _sample("llm_tool_calls_total", model="unknown", tool_name="web_search") == 1.0
+
+    def test_tool_uses_unknown_when_parent_run_not_tracked(self, handler):
+        """Tool calls with untracked parent_run_id should use model='unknown'."""
+        handler.on_tool_start(
+            {"name": "web_search"},
+            "query",
+            run_id=uuid4(),
+            parent_run_id=uuid4(),  # Not tracked in _model_names
+        )
+        assert _sample("llm_tool_calls_total", model="unknown", tool_name="web_search") == 1.0
+
 
 # Tool duration tracking
 
@@ -363,36 +391,57 @@ class TestModelExtraction:
         assert handler._model_names[str(run_id)] == "unknown"
 
 
-# Streaming token tracking
+# Streaming method tracking
 
-class TestStreamingTokenTracking:
-    def test_on_llm_new_token_increments_counter(self, handler):
+class TestStreamingMethodLabel:
+    def test_non_streaming_uses_invoke_method(self, handler):
+        """Requests without streaming tokens should use method='invoke'."""
         run_id = uuid4()
         handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
-        assert handler._streaming_tokens[str(run_id)] == 0
+        handler.on_llm_end(_make_llm_result(), run_id=run_id)
+        assert _sample("llm_requests_total", model=MODEL, method="invoke", status="ok") == 1.0
 
+    def test_streaming_uses_stream_method(self, handler):
+        """Requests with streaming tokens should use method='stream'."""
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
         handler.on_llm_new_token("hello", run_id=run_id)
-        assert handler._streaming_tokens[str(run_id)] == 1
-
         handler.on_llm_new_token(" world", run_id=run_id)
-        assert handler._streaming_tokens[str(run_id)] == 2
+        handler.on_llm_end(_make_llm_result(), run_id=run_id)
+        assert _sample("llm_requests_total", model=MODEL, method="stream", status="ok") == 1.0
 
-    def test_on_llm_end_cleans_up_streaming_tokens(self, handler):
+    def test_streaming_duration_uses_stream_method(self, handler):
+        """Streaming request durations should be labeled with method='stream'."""
         run_id = uuid4()
         handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
         handler.on_llm_new_token("hello", run_id=run_id)
         handler.on_llm_end(_make_llm_result(), run_id=run_id)
-        assert str(run_id) not in handler._streaming_tokens
+        assert _sample("llm_request_duration_seconds_count", model=MODEL, method="stream") == 1.0
 
-    def test_on_llm_error_cleans_up_streaming_tokens(self, handler):
+    def test_streaming_error_uses_stream_method(self, handler):
+        """Streaming request errors should be labeled with method='stream'."""
         run_id = uuid4()
         handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
         handler.on_llm_new_token("hello", run_id=run_id)
         handler.on_llm_error(RuntimeError("fail"), run_id=run_id)
-        assert str(run_id) not in handler._streaming_tokens
+        assert _sample("llm_requests_total", model=MODEL, method="stream", status="error") == 1.0
 
     def test_orphaned_token_without_start_is_safe(self, handler):
         handler.on_llm_new_token("hello", run_id=uuid4())  # Should not raise
+
+    def test_cleans_up_streaming_state_on_end(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_new_token("hello", run_id=run_id)
+        handler.on_llm_end(_make_llm_result(), run_id=run_id)
+        assert str(run_id) not in handler._is_streaming
+
+    def test_cleans_up_streaming_state_on_error(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_new_token("hello", run_id=run_id)
+        handler.on_llm_error(RuntimeError("fail"), run_id=run_id)
+        assert str(run_id) not in handler._is_streaming
 
 
 # Async callbacks
@@ -416,7 +465,7 @@ class TestAsyncCallbacks:
         run_id = uuid4()
         await handler.on_llm_start_async(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
         await handler.on_llm_new_token_async("hello", run_id=run_id)
-        assert handler._streaming_tokens[str(run_id)] == 1
+        assert handler._is_streaming[str(run_id)] is True
 
     @pytest.mark.asyncio
     async def test_on_llm_end_async(self, handler):
@@ -461,5 +510,5 @@ class TestAsyncCallbacks:
         await handler.on_llm_new_token_async(" world", run_id=run_id)
         await handler.on_llm_end_async(_make_llm_result(), run_id=run_id)
 
-        assert _sample("llm_requests_total", model=MODEL, method="invoke", status="ok") == 1.0
+        assert _sample("llm_requests_total", model=MODEL, method="stream", status="ok") == 1.0
         assert _sample("llm_active_requests", model=MODEL) == 0.0
