@@ -361,3 +361,105 @@ class TestModelExtraction:
         run_id = uuid4()
         handler.on_llm_start({}, ["hi"], run_id=run_id)
         assert handler._model_names[str(run_id)] == "unknown"
+
+
+# Streaming token tracking
+
+class TestStreamingTokenTracking:
+    def test_on_llm_new_token_increments_counter(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        assert handler._streaming_tokens[str(run_id)] == 0
+
+        handler.on_llm_new_token("hello", run_id=run_id)
+        assert handler._streaming_tokens[str(run_id)] == 1
+
+        handler.on_llm_new_token(" world", run_id=run_id)
+        assert handler._streaming_tokens[str(run_id)] == 2
+
+    def test_on_llm_end_cleans_up_streaming_tokens(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_new_token("hello", run_id=run_id)
+        handler.on_llm_end(_make_llm_result(), run_id=run_id)
+        assert str(run_id) not in handler._streaming_tokens
+
+    def test_on_llm_error_cleans_up_streaming_tokens(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_new_token("hello", run_id=run_id)
+        handler.on_llm_error(RuntimeError("fail"), run_id=run_id)
+        assert str(run_id) not in handler._streaming_tokens
+
+    def test_orphaned_token_without_start_is_safe(self, handler):
+        handler.on_llm_new_token("hello", run_id=uuid4())  # Should not raise
+
+
+# Async callbacks
+
+class TestAsyncCallbacks:
+    @pytest.mark.asyncio
+    async def test_on_llm_start_async(self, handler):
+        run_id = uuid4()
+        await handler.on_llm_start_async(_serialized(), ["hello"], run_id=run_id, **_invocation_kwargs())
+        assert _sample("llm_active_requests", model=MODEL) == 1.0
+        assert str(run_id) in handler._model_names
+
+    @pytest.mark.asyncio
+    async def test_on_chat_model_start_async(self, handler):
+        run_id = uuid4()
+        await handler.on_chat_model_start_async(_serialized(), [[]], run_id=run_id, **_invocation_kwargs())
+        assert _sample("llm_active_requests", model=MODEL) == 1.0
+
+    @pytest.mark.asyncio
+    async def test_on_llm_new_token_async(self, handler):
+        run_id = uuid4()
+        await handler.on_llm_start_async(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        await handler.on_llm_new_token_async("hello", run_id=run_id)
+        assert handler._streaming_tokens[str(run_id)] == 1
+
+    @pytest.mark.asyncio
+    async def test_on_llm_end_async(self, handler):
+        run_id = uuid4()
+        await handler.on_llm_start_async(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        await handler.on_llm_end_async(_make_llm_result(), run_id=run_id)
+        assert _sample("llm_requests_total", model=MODEL, method="invoke", status="ok") == 1.0
+        assert _sample("llm_active_requests", model=MODEL) == 0.0
+
+    @pytest.mark.asyncio
+    async def test_on_llm_error_async(self, handler):
+        run_id = uuid4()
+        await handler.on_llm_start_async(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        await handler.on_llm_error_async(RuntimeError("fail"), run_id=run_id)
+        assert _sample("llm_requests_total", model=MODEL, method="invoke", status="error") == 1.0
+        assert _sample("llm_active_requests", model=MODEL) == 0.0
+
+    @pytest.mark.asyncio
+    async def test_on_tool_start_async(self, handler):
+        await handler.on_tool_start_async({"name": "web_search"}, "query", run_id=uuid4())
+        assert _sample("llm_tool_calls_total", model="unknown", tool_name="web_search") == 1.0
+
+    @pytest.mark.asyncio
+    async def test_on_tool_end_async(self, handler):
+        run_id = uuid4()
+        await handler.on_tool_start_async({"name": "web_search"}, "query", run_id=run_id)
+        await handler.on_tool_end_async("results", run_id=run_id)
+        assert _sample("llm_tool_duration_seconds_count", tool_name="web_search") == 1.0
+
+    @pytest.mark.asyncio
+    async def test_on_tool_error_async(self, handler):
+        run_id = uuid4()
+        await handler.on_tool_start_async({"name": "calculator"}, "1+1", run_id=run_id)
+        await handler.on_tool_error_async(RuntimeError("fail"), run_id=run_id)
+        assert _sample("llm_tool_duration_seconds_count", tool_name="calculator") == 1.0
+
+    @pytest.mark.asyncio
+    async def test_full_async_lifecycle(self, handler):
+        run_id = uuid4()
+        await handler.on_chat_model_start_async(_serialized(), [[]], run_id=run_id, **_invocation_kwargs())
+        await handler.on_llm_new_token_async("hello", run_id=run_id)
+        await handler.on_llm_new_token_async(" world", run_id=run_id)
+        await handler.on_llm_end_async(_make_llm_result(), run_id=run_id)
+
+        assert _sample("llm_requests_total", model=MODEL, method="invoke", status="ok") == 1.0
+        assert _sample("llm_active_requests", model=MODEL) == 0.0
