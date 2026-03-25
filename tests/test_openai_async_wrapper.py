@@ -572,3 +572,92 @@ class TestAsyncStreamDelegation:
         stream_options = call_kwargs.get("stream_options") or {}
         assert stream_options.get("custom_option") is True
         assert stream_options.get("include_usage") is True
+
+
+class TestAsyncStreamContextManagerDelegation:
+    """Verify that InstrumentedAsyncOpenAIStream properly delegates __aenter__/__aexit__
+    to the inner stream, mirroring the behaviour of the sync InstrumentedOpenAIStream."""
+
+    async def test_aenter_is_called_on_inner_stream(self):
+        stream = FakeAsyncStream(chunks=[])
+        inner = MagicMock()
+        inner.create = AsyncMock(return_value=stream)
+
+        assert stream._entered is False
+
+        wrapped = InstrumentedAsyncChatCompletion(inner)
+        result_stream = await wrapped.stream(model=MODEL, max_tokens=1024, messages=[])
+        async with result_stream:
+            assert stream._entered is True
+
+    async def test_aexit_is_called_on_inner_stream(self):
+        aexit_args: list = []
+
+        class TrackingStream(FakeAsyncStream):
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                aexit_args.append((exc_type, exc_val, exc_tb))
+                return False
+
+        stream = TrackingStream(chunks=[])
+        inner = MagicMock()
+        inner.create = AsyncMock(return_value=stream)
+
+        wrapped = InstrumentedAsyncChatCompletion(inner)
+        result_stream = await wrapped.stream(model=MODEL, max_tokens=1024, messages=[])
+        async with result_stream:
+            pass
+
+        assert len(aexit_args) == 1
+        assert aexit_args[0] == (None, None, None)
+
+    async def test_aenter_error_records_error_status_and_reraises(self):
+        class FailingEnterStream:
+            async def __aenter__(self):
+                raise RuntimeError("enter failed")
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+            async def close(self):
+                pass
+
+        inner = MagicMock()
+        inner.create = AsyncMock(return_value=FailingEnterStream())
+
+        wrapped = InstrumentedAsyncChatCompletion(inner)
+        result_stream = await wrapped.stream(model=MODEL, max_tokens=1024, messages=[])
+
+        with pytest.raises(RuntimeError, match="enter failed"):
+            async with result_stream:
+                pass
+
+        assert _sample("llm_requests_total", model=MODEL, method="stream", status="error") == 1.0
+
+    async def test_aenter_error_decrements_active_requests(self):
+        class FailingEnterStream:
+            async def __aenter__(self):
+                raise RuntimeError("enter failed")
+
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                return False
+
+            async def close(self):
+                pass
+
+        inner = MagicMock()
+        inner.create = AsyncMock(return_value=FailingEnterStream())
+
+        wrapped = InstrumentedAsyncChatCompletion(inner)
+        result_stream = await wrapped.stream(model=MODEL, max_tokens=1024, messages=[])
+
+        with pytest.raises(RuntimeError):
+            async with result_stream:
+                pass
+
+        assert _sample("llm_active_requests", model=MODEL) == 0.0
