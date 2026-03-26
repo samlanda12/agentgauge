@@ -323,19 +323,22 @@ class TestStreamMetrics:
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") == 175.0
         assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 40.0
 
-    def test_records_tool_calls_from_final_response(self, inner):
-        # OpenAI streams can accumulate tool calls in the stream object
-        stream_with_tool = FakeStream(
-            chunks=["chunk"],
-            choices=[
-                FakeChoice(
-                    message=FakeMessage(
-                        tool_calls=[FakeToolCall(function=FakeFunction(name="web_search"))]
-                    )
+    def test_records_tool_calls_from_streaming_deltas(self, inner):
+        """Test tool call tracking from streaming chunks with delta.tool_calls.
+
+        This simulates how OpenAI actually streams tool calls - as incremental deltas
+        across multiple chunks. This provider-agnostic approach works with vLLM, 
+        Ollama, and other OpenAI-compatible providers.
+        """
+        # Streaming chunk with tool call delta (simulates OpenAI's actual format)
+        chunk = FakeChunkWithDelta(
+            choices=[FakeChoiceWithDelta(
+                delta=FakeDelta(
+                    tool_calls=[FakeDeltaToolCall(index=0, function=FakeDeltaFunction(name="web_search"))]
                 )
-            ]
+            )]
         )
-        inner.create.return_value = stream_with_tool
+        inner.create.return_value = FakeStream(chunks=[chunk], choices=None)
         wrapped = InstrumentedChatCompletion(inner)
         with wrapped.stream(model=MODEL, messages=[]) as stream:
             list(stream)
@@ -450,3 +453,181 @@ class TestStreamDelegation:
             result = list(stream)
         assert result == chunks  # Verify wrapper passes through chunks correctly
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") is None
+
+
+# Helper classes for streaming tool call delta tests
+
+@dataclass
+class FakeDeltaFunction:
+    """Function part of a tool call delta, name only present in first chunk."""
+    name: Optional[str] = None
+
+
+@dataclass
+class FakeDeltaToolCall:
+    """A tool call within a streaming delta."""
+    index: int
+    function: Optional[FakeDeltaFunction] = None
+
+
+@dataclass
+class FakeDelta:
+    """The delta content of a streaming chunk."""
+    tool_calls: Optional[List[FakeDeltaToolCall]] = None
+
+
+@dataclass
+class FakeChoiceWithDelta:
+    """A choice within a streaming chunk containing a delta."""
+    delta: FakeDelta
+
+
+@dataclass
+class FakeChunkWithDelta:
+    """A streaming chunk with delta content (how OpenAI streams tool calls)."""
+    choices: Optional[List[FakeChoiceWithDelta]] = None
+    usage: Optional[FakeUsage] = None
+
+
+class TestStreamToolCallDeltas:
+    """Tests for provider-agnostic tool call tracking from streaming deltas."""
+
+    def test_records_tool_calls_from_streaming_deltas(self, inner):
+        """Test tool call tracking from streaming chunks with delta.tool_calls.
+
+        This simulates how OpenAI actually streams tool calls - as incremental deltas
+        across multiple chunks, not as a final accumulated response. This is the
+        provider-agnostic approach that works with vLLM, Ollama, etc.
+        """
+        # First chunk: initial tool call with name for index 0
+        chunk1 = FakeChunkWithDelta(
+            choices=[FakeChoiceWithDelta(
+                delta=FakeDelta(
+                    tool_calls=[FakeDeltaToolCall(index=0, function=FakeDeltaFunction(name="web_search"))]
+                )
+            )]
+        )
+        # Second chunk: arguments streaming for index 0 (no name)
+        chunk2 = FakeChunkWithDelta(
+            choices=[FakeChoiceWithDelta(
+                delta=FakeDelta(
+                    tool_calls=[FakeDeltaToolCall(index=0, function=FakeDeltaFunction(name=None))]
+                )
+            )]
+        )
+        # Third chunk: second tool call with name for index 1
+        chunk3 = FakeChunkWithDelta(
+            choices=[FakeChoiceWithDelta(
+                delta=FakeDelta(
+                    tool_calls=[FakeDeltaToolCall(index=1, function=FakeDeltaFunction(name="calculator"))]
+                )
+            )]
+        )
+        # Fourth chunk: arguments for index 1 (no name)
+        chunk4 = FakeChunkWithDelta(
+            choices=[FakeChoiceWithDelta(
+                delta=FakeDelta(
+                    tool_calls=[FakeDeltaToolCall(index=1, function=FakeDeltaFunction(name=None))]
+                )
+            )]
+        )
+
+        # Create a stream that does NOT expose accumulated choices (simulating non-OpenAI providers)
+        chunks = [chunk1, chunk2, chunk3, chunk4]
+        inner.create.return_value = FakeStream(chunks=chunks, choices=None)
+        wrapped = InstrumentedChatCompletion(inner)
+        with wrapped.stream(model=MODEL, messages=[]) as stream:
+            list(stream)
+
+        # Tool calls should be tracked from deltas, not from stream.choices
+        assert _sample("llm_tool_calls_total", model=MODEL, tool_name="web_search") == 1.0
+        assert _sample("llm_tool_calls_total", model=MODEL, tool_name="calculator") == 1.0
+
+    def test_accumulates_repeated_tool_calls_by_name(self, inner):
+        """Test that multiple calls to the same tool are accumulated correctly."""
+        # Three calls to the same tool with different indices
+        chunks = [
+            FakeChunkWithDelta(
+                choices=[FakeChoiceWithDelta(
+                    delta=FakeDelta(
+                        tool_calls=[FakeDeltaToolCall(index=0, function=FakeDeltaFunction(name="web_search"))]
+                    )
+                )]
+            ),
+            FakeChunkWithDelta(
+                choices=[FakeChoiceWithDelta(
+                    delta=FakeDelta(
+                        tool_calls=[FakeDeltaToolCall(index=1, function=FakeDeltaFunction(name="web_search"))]
+                    )
+                )]
+            ),
+            FakeChunkWithDelta(
+                choices=[FakeChoiceWithDelta(
+                    delta=FakeDelta(
+                        tool_calls=[FakeDeltaToolCall(index=2, function=FakeDeltaFunction(name="web_search"))]
+                    )
+                )]
+            ),
+        ]
+        inner.create.return_value = FakeStream(chunks=chunks, choices=None)
+        wrapped = InstrumentedChatCompletion(inner)
+        with wrapped.stream(model=MODEL, messages=[]) as stream:
+            list(stream)
+
+        assert _sample("llm_tool_calls_total", model=MODEL, tool_name="web_search") == 3.0
+
+    def test_handles_dict_style_tool_call_deltas(self, inner):
+        """Test that dict-style tool call deltas (common in some providers) are handled."""
+        # Some providers return tool_calls as dicts rather than objects
+        chunk = FakeChunkWithDelta(
+            choices=[FakeChoiceWithDelta(
+                delta=FakeDelta(
+                    tool_calls=[{"index": 0, "function": {"name": "dict_style_tool"}}]
+                )
+            )]
+        )
+        inner.create.return_value = FakeStream(chunks=[chunk], choices=None)
+        wrapped = InstrumentedChatCompletion(inner)
+        with wrapped.stream(model=MODEL, messages=[]) as stream:
+            list(stream)
+
+        assert _sample("llm_tool_calls_total", model=MODEL, tool_name="dict_style_tool") == 1.0
+
+    def test_no_tool_calls_when_deltas_have_no_tool_calls(self, inner):
+        """Test that no tool calls are recorded when chunks have no tool call deltas."""
+        chunks = [
+            FakeChunkWithDelta(
+                choices=[FakeChoiceWithDelta(delta=FakeDelta(tool_calls=None))]
+            ),
+            FakeChunkWithDelta(
+                choices=[FakeChoiceWithDelta(delta=FakeDelta(tool_calls=[]))]
+            ),
+        ]
+        inner.create.return_value = FakeStream(chunks=chunks, choices=None)
+        wrapped = InstrumentedChatCompletion(inner)
+        with wrapped.stream(model=MODEL, messages=[]) as stream:
+            list(stream)
+
+        assert _sample("llm_tool_calls_total", model=MODEL, tool_name="any_tool") is None
+
+    def test_tool_calls_with_usage_in_same_chunk(self, inner):
+        """Test that tool calls and usage are tracked together from the same stream."""
+        chunk1 = FakeChunkWithDelta(
+            choices=[FakeChoiceWithDelta(
+                delta=FakeDelta(
+                    tool_calls=[FakeDeltaToolCall(index=0, function=FakeDeltaFunction(name="web_search"))]
+                )
+            )]
+        )
+        chunk2 = FakeChunkWithDelta(
+            choices=[FakeChoiceWithDelta(delta=FakeDelta(tool_calls=None))],
+            usage=FakeUsage(prompt_tokens=100, completion_tokens=50)
+        )
+        inner.create.return_value = FakeStream(chunks=[chunk1, chunk2], choices=None)
+        wrapped = InstrumentedChatCompletion(inner)
+        with wrapped.stream(model=MODEL, messages=[]) as stream:
+            list(stream)
+
+        assert _sample("llm_tool_calls_total", model=MODEL, tool_name="web_search") == 1.0
+        assert _sample("llm_tokens_total", model=MODEL, token_type="input") == 100.0
+        assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 50.0

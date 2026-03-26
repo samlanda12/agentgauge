@@ -49,7 +49,7 @@ class FakeAsyncStream:
         self._chunks = content_chunks
         self._iter_chunks = []
         self._final_response = final_response
-        # Expose choices on the stream for tool-call tracking (unchanged behaviour)
+        # Expose choices on the stream for tool-call tracking
         self.choices = final_response.choices if final_response else None
         self._entered = False
 
@@ -391,22 +391,48 @@ class TestAsyncStreamMetrics:
         assert _sample("llm_tokens_total", model=MODEL, token_type="input") == 150.0
         assert _sample("llm_tokens_total", model=MODEL, token_type="output") == 30.0
 
-    async def test_records_tool_calls_from_final_response(self, inner):
-        stream = FakeAsyncStream(
-            chunks=["chunk1"],
-            final_response=FakeChatCompletion(
-                choices=[
-                    FakeChoice(
-                        message=FakeMessage(
-                            tool_calls=[
-                                FakeToolCall(function=FakeFunction(name="search_web")),
-                                FakeToolCall(function=FakeFunction(name="read_file")),
-                            ]
-                        )
-                    )
-                ]
-            ),
+    async def test_records_tool_calls_from_streaming_deltas(self, inner):
+        """Test tool call tracking from streaming chunks with delta.tool_calls.
+
+        This simulates how OpenAI actually streams tool calls - as incremental deltas
+        across multiple chunks. This provider-agnostic approach works with vLLM,
+        Ollama, and other OpenAI-compatible providers.
+        """
+        # Helper dataclasses for streaming delta format
+        @dataclass
+        class FakeDeltaFunction:
+            name: Optional[str] = None
+
+        @dataclass
+        class FakeDeltaToolCall:
+            index: int
+            function: Optional[FakeDeltaFunction] = None
+
+        @dataclass
+        class FakeDelta:
+            tool_calls: Optional[List[FakeDeltaToolCall]] = None
+
+        @dataclass
+        class FakeChoiceWithDelta:
+            delta: FakeDelta
+
+        # Streaming chunks with tool call deltas
+        chunk1 = FakeChunk(
+            choices=[FakeChoiceWithDelta(
+                delta=FakeDelta(
+                    tool_calls=[FakeDeltaToolCall(index=0, function=FakeDeltaFunction(name="search_web"))]
+                )
+            )]
         )
+        chunk2 = FakeChunk(
+            choices=[FakeChoiceWithDelta(
+                delta=FakeDelta(
+                    tool_calls=[FakeDeltaToolCall(index=1, function=FakeDeltaFunction(name="read_file"))]
+                )
+            )]
+        )
+
+        stream = FakeAsyncStream(chunks=[chunk1, chunk2])
         inner = MagicMock()
         inner.create = AsyncMock(return_value=stream)
 
