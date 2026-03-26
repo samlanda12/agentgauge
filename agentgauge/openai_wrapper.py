@@ -326,7 +326,10 @@ class InstrumentedOpenAIStream:
                         model=self._model, tool_name=tool_name
                     ).inc()
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to record token/tool metrics for model %s",
+                    self._model,
+                )
 
 
 class InstrumentedAsyncOpenAIStream:
@@ -438,8 +441,10 @@ class InstrumentedAsyncOpenAIStream:
                         model=self._model, tool_name=tool_name
                     ).inc()
             except Exception:
-                # If we can't get token usage or tool calls, just skip it
-                pass
+                logger.warning(
+                    "Failed to record token/tool metrics for model %s",
+                    self._model,
+                )
 
     def __getattr__(self, name: str) -> Any:
         """Delegate all other attributes to the underlying stream."""

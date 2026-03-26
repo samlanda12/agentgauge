@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any, Dict, List, Optional, TypedDict
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 try:
     from langchain_core.callbacks import BaseCallbackHandler
@@ -162,7 +165,10 @@ def _record_token_usage(result: LLMResult, model: str) -> None:
                 LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
             _record_langchain_cache_tokens(usage_metadata, model)
     except (IndexError, AttributeError):
-        pass
+        logger.warning(
+            "Failed to record token metrics for model %s",
+            model,
+        )
 
 
 class agentgaugeCallbackHandler(BaseCallbackHandler):
