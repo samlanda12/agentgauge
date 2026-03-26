@@ -11,9 +11,15 @@ from .openai_wrapper import InstrumentedAsyncChatCompletion, InstrumentedChatCom
 __all__ = [
     "instrument",
     "InstrumentedMessages",
+    "InstrumentedAnthropicClient",
+    "InstrumentedAsyncAnthropicClient",
+    "InstrumentedAsyncChatCompletionProxy",
     "InstrumentedAsyncMessages",
+    "InstrumentedAsyncOpenAIClient",
     "InstrumentedChatCompletion",
     "InstrumentedAsyncChatCompletion",
+    "InstrumentedChatCompletionProxy",
+    "InstrumentedOpenAIClient",
 ]
 
 try:

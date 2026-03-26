@@ -5,9 +5,19 @@ from unittest.mock import MagicMock, AsyncMock, patch
 import pytest
 
 import agentgauge
-from agentgauge import instrument
-from agentgauge.anthropic_wrapper import InstrumentedAsyncMessages, InstrumentedMessages
-from agentgauge.openai_wrapper import InstrumentedAsyncChatCompletion, InstrumentedChatCompletion
+from agentgauge import (
+    instrument,
+    InstrumentedAnthropicClient,
+    InstrumentedAsyncAnthropicClient,
+    InstrumentedAsyncChatCompletion,
+    InstrumentedAsyncChatCompletionProxy,
+    InstrumentedAsyncMessages,
+    InstrumentedAsyncOpenAIClient,
+    InstrumentedChatCompletion,
+    InstrumentedChatCompletionProxy,
+    InstrumentedMessages,
+    InstrumentedOpenAIClient,
+)
 
 ANTHROPIC_MODEL = "claude-sonnet-4-5-20250929"
 OPENAI_MODEL = "gpt-4-turbo"
@@ -174,3 +184,40 @@ def test_async_anthropic_proxies_attributes(mock_async_anthropic_client):
 def test_async_openai_proxies_attributes(mock_async_openai_client):
     mock_async_openai_client.api_key = "sk-test-async"
     assert instrument(mock_async_openai_client, start_server=False).api_key == "sk-test-async"
+
+
+# Proxy classes are exported in __all__
+
+def test_proxy_classes_in_all():
+    """Verify all proxy classes are exported in __all__."""
+    import agentgauge
+    proxy_classes = [
+        "InstrumentedAnthropicClient",
+        "InstrumentedOpenAIClient",
+        "InstrumentedChatCompletionProxy",
+        "InstrumentedAsyncAnthropicClient",
+        "InstrumentedAsyncOpenAIClient",
+        "InstrumentedAsyncChatCompletionProxy",
+    ]
+    for cls_name in proxy_classes:
+        assert cls_name in agentgauge.__all__, f"{cls_name} not in __all__"
+        assert hasattr(agentgauge, cls_name), f"{cls_name} not accessible from package"
+
+
+def test_proxy_classes_importable():
+    """Verify proxy classes can be imported for type annotations."""
+    from agentgauge import (
+        InstrumentedAnthropicClient,
+        InstrumentedOpenAIClient,
+        InstrumentedChatCompletionProxy,
+        InstrumentedAsyncAnthropicClient,
+        InstrumentedAsyncOpenAIClient,
+        InstrumentedAsyncChatCompletionProxy,
+    )
+
+    assert callable(InstrumentedAnthropicClient)
+    assert callable(InstrumentedOpenAIClient)
+    assert callable(InstrumentedChatCompletionProxy)
+    assert callable(InstrumentedAsyncAnthropicClient)
+    assert callable(InstrumentedAsyncOpenAIClient)
+    assert callable(InstrumentedAsyncChatCompletionProxy)
