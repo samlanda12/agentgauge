@@ -1,4 +1,4 @@
-"""Tests for AgentGaugeCallbackHandler."""
+"""Tests for agentgaugeCallbackHandler."""
 
 from uuid import uuid4
 
@@ -9,7 +9,7 @@ pytest.importorskip("langchain_core")
 from langchain_core.messages import AIMessage  # noqa: E402
 from langchain_core.outputs import ChatGeneration, LLMResult  # noqa: E402
 
-from agentgauge.langchain_callback import AgentGaugeCallbackHandler  # noqa: E402
+from agentgauge.langchain_callback import agentgaugeCallbackHandler  # noqa: E402
 
 from prometheus_client import REGISTRY  # noqa: E402
 
@@ -56,8 +56,8 @@ def _invocation_kwargs(model: str = MODEL) -> dict:
 
 
 @pytest.fixture
-def handler() -> AgentGaugeCallbackHandler:
-    return AgentGaugeCallbackHandler()
+def handler() -> agentgaugeCallbackHandler:
+    return agentgaugeCallbackHandler()
 
 # on_llm_start
 

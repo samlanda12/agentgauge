@@ -92,9 +92,9 @@ pip install agentgauge[langchain] langchain-openai
 
 ```python
 from langchain_openai import ChatOpenAI
-from agentgauge import AgentGaugeCallbackHandler
+from agentgauge import agentgaugeCallbackHandler
 
-handler = AgentGaugeCallbackHandler()
+handler = agentgaugeCallbackHandler()
 
 llm = ChatOpenAI(model="gpt-4o", callbacks=[handler])
 
@@ -113,9 +113,9 @@ pip install agentgauge[langchain] langchain-openai langgraph
 from langchain_openai import ChatOpenAI
 from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
-from agentgauge import AgentGaugeCallbackHandler
+from agentgauge import agentgaugeCallbackHandler
 
-handler = AgentGaugeCallbackHandler()
+handler = agentgaugeCallbackHandler()
 
 llm = ChatOpenAI(model="gpt-4o")
 agent = create_react_agent(llm, tools=[...])

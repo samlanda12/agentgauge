@@ -9,7 +9,7 @@ try:
     from langchain_core.outputs import LLMResult
 except ImportError as e:
     raise ImportError(
-        "langchain-core is required to use AgentGaugeCallbackHandler. "
+        "langchain-core is required to use agentgaugeCallbackHandler. "
         "Install it with: pip install agentgauge[langchain]"
     ) from e
 
@@ -165,7 +165,7 @@ def _record_token_usage(result: LLMResult, model: str) -> None:
         pass
 
 
-class AgentGaugeCallbackHandler(BaseCallbackHandler):
+class agentgaugeCallbackHandler(BaseCallbackHandler):
     """LangChain/LangGraph callback handler that records Prometheus metrics.
 
     Supports both LangChain chains and LangGraph workflows. Attach to any

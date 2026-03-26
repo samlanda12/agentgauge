@@ -1,4 +1,4 @@
-"""Integration tests for AgentGaugeCallbackHandler with LangChain.
+"""Integration tests for agentgaugeCallbackHandler with LangChain.
 
 These tests verify that the callback handler works correctly with
 actual LangChain chat models (using mocks to avoid real API calls).
@@ -14,7 +14,7 @@ from uuid import uuid4
 from langchain_core.outputs import LLMResult, ChatGeneration
 from prometheus_client import REGISTRY
 
-from agentgauge.langchain_callback import AgentGaugeCallbackHandler
+from agentgauge.langchain_callback import agentgaugeCallbackHandler
 
 
 MODEL = "gpt-4o"
@@ -25,11 +25,11 @@ def _sample(metric_name, **labels):
 
 
 class TestLangChainChatOpenAIIntegration:
-    """Integration tests for AgentGaugeCallbackHandler with ChatOpenAI-style models."""
+    """Integration tests for agentgaugeCallbackHandler with ChatOpenAI-style models."""
 
     @pytest.fixture
     def handler(self):
-        return AgentGaugeCallbackHandler()
+        return agentgaugeCallbackHandler()
 
     @pytest.fixture
     def mock_chat_result(self):
@@ -99,11 +99,11 @@ class TestLangChainChatOpenAIIntegration:
 
 
 class TestLangChainAnthropicIntegration:
-    """Integration tests for AgentGaugeCallbackHandler with ChatAnthropic-style models."""
+    """Integration tests for agentgaugeCallbackHandler with ChatAnthropic-style models."""
 
     @pytest.fixture
     def handler(self):
-        return AgentGaugeCallbackHandler()
+        return agentgaugeCallbackHandler()
 
     @pytest.fixture
     def mock_anthropic_result(self):
@@ -148,7 +148,7 @@ class TestLangChainToolCalls:
 
     @pytest.fixture
     def handler(self):
-        return AgentGaugeCallbackHandler()
+        return agentgaugeCallbackHandler()
 
     def test_tool_start_records_tool_call(self, handler):
         """Test that on_tool_start records tool call metrics."""
@@ -179,7 +179,7 @@ class TestLangChainChainPropagation:
 
     @pytest.fixture
     def handler(self):
-        return AgentGaugeCallbackHandler()
+        return agentgaugeCallbackHandler()
 
     def test_nested_runs_are_independently_tracked(self, handler):
         """Test that nested/parallel runs are tracked independently."""
