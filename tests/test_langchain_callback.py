@@ -536,3 +536,120 @@ class TestAsyncCallbacks:
 
         assert _sample("llm_requests_total", model=MODEL, method="stream", status="ok") == 1.0
         assert _sample("llm_active_requests", model=MODEL) == 0.0
+
+
+# Cache token tracking
+
+def _make_streaming_result_with_cache(**extra_metadata) -> LLMResult:
+    """Build a streaming LLMResult (empty llm_output) with cache keys in usage_metadata."""
+    usage_metadata = {
+        "input_tokens": 100,
+        "output_tokens": 25,
+        "total_tokens": 125,
+        **extra_metadata,
+    }
+    message = AIMessage(content="Hello!", usage_metadata=usage_metadata)
+    return LLMResult(
+        generations=[[ChatGeneration(text="Hello!", message=message)]],
+        llm_output={},
+    )
+
+
+class TestCacheTokenTracking:
+    def test_anthropic_cache_read_tokens(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_end(
+            _make_streaming_result_with_cache(cache_read_input_tokens=80),
+            run_id=run_id,
+        )
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 80.0
+
+    def test_anthropic_cache_creation_tokens(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_end(
+            _make_streaming_result_with_cache(cache_creation_input_tokens=20),
+            run_id=run_id,
+        )
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 20.0
+
+    def test_openai_cached_tokens(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_end(
+            _make_streaming_result_with_cache(cached_tokens=60),
+            run_id=run_id,
+        )
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 60.0
+
+    def test_modern_langchain_input_token_details_cache_read(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_end(
+            _make_streaming_result_with_cache(input_token_details={"cache_read": 50}),
+            run_id=run_id,
+        )
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 50.0
+
+    def test_modern_langchain_input_token_details_cache_creation(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_end(
+            _make_streaming_result_with_cache(input_token_details={"cache_creation": 30}),
+            run_id=run_id,
+        )
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 30.0
+
+    def test_no_cache_tokens_when_not_present(self, handler):
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_end(_make_streaming_result_with_cache(), run_id=run_id)
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") is None
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") is None
+
+    def test_flat_keys_take_priority_over_input_token_details(self, handler):
+        """Flat provider keys take priority to avoid double-counting when both are present."""
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        # Both flat key and nested input_token_details present; flat wins
+        handler.on_llm_end(
+            _make_streaming_result_with_cache(
+                cache_read_input_tokens=80,
+                input_token_details={"cache_read": 999},
+            ),
+            run_id=run_id,
+        )
+        # Should be 80 (flat), not 1079 (flat + nested) or 999 (nested only)
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 80.0
+
+    def test_anthropic_cache_read_takes_priority_over_openai_cached_tokens(self, handler):
+        """Anthropic flat key takes priority over OpenAI cached_tokens to avoid double-counting."""
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_end(
+            _make_streaming_result_with_cache(
+                cache_read_input_tokens=70,
+                cached_tokens=999,
+            ),
+            run_id=run_id,
+        )
+        # Should be 70 (Anthropic), not 999 (OpenAI) or 1069 (both)
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 70.0
+
+    def test_cache_tokens_not_recorded_via_llm_output_path(self, handler):
+        """Cache tokens are only recorded via the usage_metadata path, not llm_output."""
+        run_id = uuid4()
+        handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+        handler.on_llm_end(_make_llm_result(), run_id=run_id)
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") is None
+
+    def test_multiple_calls_accumulate_cache_tokens(self, handler):
+        for _ in range(3):
+            run_id = uuid4()
+            handler.on_llm_start(_serialized(), ["hi"], run_id=run_id, **_invocation_kwargs())
+            handler.on_llm_end(
+                _make_streaming_result_with_cache(cache_read_input_tokens=10),
+                run_id=run_id,
+            )
+        assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 30.0

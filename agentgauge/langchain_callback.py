@@ -15,6 +15,7 @@ except ImportError as e:
 
 from .metrics import (
     LLM_ACTIVE_REQUESTS,
+    LLM_CACHE_TOKENS_TOTAL,
     LLM_REQUEST_DURATION_SECONDS,
     LLM_REQUESTS_TOTAL,
     LLM_TOKENS_TOTAL,
@@ -67,6 +68,52 @@ def _extract_model(serialized: Optional[Dict[str, Any]], kwargs: Dict[str, Any])
     return "unknown"
 
 
+def _record_langchain_cache_tokens(usage_metadata: Dict[str, Any], model: str) -> None:
+    """Record cache token metrics from a LangChain AIMessage.usage_metadata dict.
+
+    Handles provider-specific keys that may appear in usage_metadata:
+    - Anthropic: 'cache_read_input_token', 'cache_creation_input_tokens'
+    - OpenAI: 'cached_tokens'
+    - Modern LangChain (>= 0.3): 'input_token_details["cache_read"]' /
+      'input_token_details["cache_creation"]'
+
+    Flat provider keys take priority over nested 'input_token_details' to avoid
+    double-counting when both are present in the same response.
+    """
+    cache_read: Optional[int] = None
+    cache_creation: Optional[int] = None
+
+    flat_cache_read = usage_metadata.get("cache_read_input_tokens")
+    if isinstance(flat_cache_read, int):
+        cache_read = flat_cache_read
+
+    flat_cache_creation = usage_metadata.get("cache_creation_input_tokens")
+    if isinstance(flat_cache_creation, int):
+        cache_creation = flat_cache_creation
+
+    cached_tokens = usage_metadata.get("cached_tokens")
+    if isinstance(cached_tokens, int) and cache_read is None:
+        cache_read = cached_tokens
+
+    input_token_details = usage_metadata.get("input_token_details")
+    if isinstance(input_token_details, dict):
+        if cache_read is None:
+            details_cache_read = input_token_details.get("cache_read")
+            if isinstance(details_cache_read, int):
+                cache_read = details_cache_read
+
+        if cache_creation is None:
+            details_cache_creation = input_token_details.get("cache_creation")
+            if isinstance(details_cache_creation, int):
+                cache_creation = details_cache_creation
+
+    if isinstance(cache_read, int):
+        LLM_CACHE_TOKENS_TOTAL.labels(model=model, cache_type="read").inc(cache_read)
+
+    if isinstance(cache_creation, int):
+        LLM_CACHE_TOKENS_TOTAL.labels(model=model, cache_type="creation").inc(cache_creation)
+
+
 def _record_token_usage(result: LLMResult, model: str) -> None:
     """Record token usage from an LLMResult.
 
@@ -113,6 +160,7 @@ def _record_token_usage(result: LLMResult, model: str) -> None:
                 LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
             if isinstance(output_tokens, int):
                 LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+            _record_langchain_cache_tokens(usage_metadata, model)
     except (IndexError, AttributeError):
         pass
 
