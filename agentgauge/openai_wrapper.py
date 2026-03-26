@@ -94,10 +94,12 @@ def _accumulate_tool_calls_from_chunk(chunk: Any, tool_calls: dict[int, str]) ->
 
             # Get function name: only present in the first chunk for each tool call
             func = None
-            if hasattr(tool_call, "function") and tool_call.function is not None:
-                func = tool_call.function
-            elif isinstance(tool_call, dict) and "function" in tool_call:
+            if isinstance(tool_call, dict) and "function" in tool_call:
                 func = tool_call["function"]
+            elif hasattr(tool_call, "function"):
+                func = tool_call.function  # type: ignore[union-attr]
+                if func is None:
+                    func = None
 
             if func is not None:
                 if hasattr(func, "name") and func.name is not None:

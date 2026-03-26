@@ -21,7 +21,7 @@ class FakePromptTokensDetails:
 class FakeUsage:
     prompt_tokens: int = 100
     completion_tokens: int = 25
-    prompt_tokens_details: FakePromptTokensDetails = field(default_factory=FakePromptTokensDetails)
+    prompt_tokens_details: Optional[FakePromptTokensDetails] = field(default_factory=FakePromptTokensDetails)
 
 
 @dataclass

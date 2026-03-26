@@ -44,7 +44,7 @@ class FakePromptTokensDetails:
 class FakeUsage:
     prompt_tokens: int = 100
     completion_tokens: int = 25
-    prompt_tokens_details: FakePromptTokensDetails = field(default_factory=FakePromptTokensDetails)
+    prompt_tokens_details: Optional[FakePromptTokensDetails] = field(default_factory=FakePromptTokensDetails)
 
 
 @dataclass
@@ -449,6 +449,7 @@ class TestStreamDelegation:
         chunks = [FakeChunk(), FakeChunk()]
         inner.create.return_value = FakeStream(chunks=chunks)
         wrapped = InstrumentedChatCompletion(inner)
+        result = None
         with wrapped.stream(model=MODEL, messages=[]) as stream:
             result = list(stream)
         assert result == chunks  # Verify wrapper passes through chunks correctly
@@ -473,7 +474,7 @@ class FakeDeltaToolCall:
 @dataclass
 class FakeDelta:
     """The delta content of a streaming chunk."""
-    tool_calls: Optional[List[FakeDeltaToolCall]] = None
+    tool_calls: Optional[List[FakeDeltaToolCall]] = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -582,7 +583,7 @@ class TestStreamToolCallDeltas:
         chunk = FakeChunkWithDelta(
             choices=[FakeChoiceWithDelta(
                 delta=FakeDelta(
-                    tool_calls=[{"index": 0, "function": {"name": "dict_style_tool"}}]
+                    tool_calls=[{"index": 0, "function": {"name": "dict_style_tool"}}]  # type: ignore[arg-type]
                 )
             )]
         )
