@@ -186,8 +186,10 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
         super().__init__()
         self._request_starts: Dict[str, float] = {}
         self._model_names: Dict[str, str] = {}
+        self._completed_models: Dict[str, str] = {}  # Completed LLM runs
         self._tool_starts: Dict[str, float] = {}
         self._tool_names: Dict[str, str] = {}
+        self._tool_models: Dict[str, str] = {}
         self._is_streaming: Dict[str, bool] = {}
 
     # Sync LLM callbacks
@@ -263,6 +265,9 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
         if model is None:
             return
 
+        # Preserve model for late tools. LangGraph pattern: LLM ends before tool starts
+        self._completed_models[key] = model
+
         is_streaming = self._is_streaming.pop(key, False)
 
         if key in self._request_starts:
@@ -289,6 +294,8 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
         model = self._model_names.pop(key, None)
         if model is None:
             return
+
+        self._completed_models[key] = model
 
         is_streaming = self._is_streaming.pop(key, False)
 
@@ -424,8 +431,12 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
         key = str(run_id)
         self._tool_starts[key] = time.monotonic()
         self._tool_names[key] = tool_name
-        # Look up model from parent LLM run if available
-        model = self._model_names.get(str(parent_run_id), "unknown") if parent_run_id else "unknown"
+        model = self._model_names.get(str(parent_run_id))
+        if model is None:
+            model = self._completed_models.get(str(parent_run_id))
+        if model is None:
+            model = "unknown"
+        self._tool_models[key] = model
         LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
 
     def on_tool_end(
@@ -442,6 +453,8 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
         tool_name = self._tool_names.pop(key, None)
         if tool_name is None:
             return
+
+        self._tool_models.pop(key, None)
 
         if key in self._tool_starts:
             duration = time.monotonic() - self._tool_starts.pop(key)
@@ -461,6 +474,8 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
         tool_name = self._tool_names.pop(key, None)
         if tool_name is None:
             return
+
+        self._tool_models.pop(key, None)
 
         if key in self._tool_starts:
             duration = time.monotonic() - self._tool_starts.pop(key)

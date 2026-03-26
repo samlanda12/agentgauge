@@ -322,6 +322,30 @@ class TestToolCallTracking:
         )
         assert _sample("llm_tool_calls_total", model="unknown", tool_name="web_search") == 1.0
 
+    def test_tool_inherits_model_when_llm_ends_before_tool_starts(self, handler):
+        """LangGraph pattern: LLM completes before tool executes.
+
+        The model name should still be available for tool attribution even
+        after the parent LLM run has completed and cleaned up _model_names.
+        """
+        parent_run_id = uuid4()
+        tool_run_id = uuid4()
+
+        # LLM starts and ends (tool decision returned)
+        handler.on_llm_start(_serialized(), ["hi"], run_id=parent_run_id, **_invocation_kwargs())
+        handler.on_llm_end(_make_llm_result(), run_id=parent_run_id)  # Model preserved in _completed_models
+
+        # Tool runs AFTER LLM completed - this is the LangGraph pattern
+        handler.on_tool_start(
+            {"name": "web_search"},
+            "query",
+            run_id=tool_run_id,
+            parent_run_id=parent_run_id,
+        )
+
+        # Tool should still get correct model attribution via _completed_models
+        assert _sample("llm_tool_calls_total", model=MODEL, tool_name="web_search") == 1.0
+
 
 # Tool duration tracking
 
