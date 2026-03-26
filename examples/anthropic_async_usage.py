@@ -1,6 +1,5 @@
 import asyncio
 import os
-import time
 
 import anthropic
 from dotenv import load_dotenv
