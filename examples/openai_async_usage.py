@@ -1,6 +1,5 @@
 import asyncio
 import os
-import time
 
 from openai import AsyncOpenAI
 from dotenv import load_dotenv
@@ -34,7 +33,7 @@ async def main() -> None:
     async with stream as s:
         async for chunk in s:
             pass  # consume the stream
-    print(f"Stream completed (tokens tracked via stream_options)")
+    print("Stream completed (tokens tracked via stream_options)")
     print()
 
     print("Metrics available at http://localhost:9464/metrics")

@@ -17,7 +17,7 @@ __all__ = [
 ]
 
 try:
-    from .langchain_callback import AgentGaugeCallbackHandler
+    from .langchain_callback import AgentGaugeCallbackHandler  # noqa: F401
 
     __all__.append("AgentGaugeCallbackHandler")
 except ImportError:

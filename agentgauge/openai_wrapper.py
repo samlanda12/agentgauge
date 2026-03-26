@@ -348,20 +348,43 @@ class InstrumentedAsyncOpenAIStream:
         self._start = time.monotonic()
         LLM_ACTIVE_REQUESTS.labels(model=self._model).inc()
         self._entered = True
-        return self
+        try:
+            entered_stream = await self._stream.__aenter__()
+            if entered_stream is not None:
+                self._stream = entered_stream
+            return self
+        except Exception:
+            self._status = "error"
+            self._record_metrics()
+            raise
 
     async def __aexit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> bool:
         """Exit the async stream context and record final metrics."""
         if exc_type is not None:
             self._status = "error"
 
-        self._record_metrics()
+        try:
+            await self._stream.__aexit__(exc_type, exc_val, exc_tb)
+        except Exception as e:
+            logger.exception(
+                "Exception during stream cleanup for model %s: %s",
+                self._model,
+                e,
+            )
 
         if hasattr(self._stream, "close"):
-            close_result = self._stream.close()
-            if inspect.isawaitable(close_result):
-                await close_result
+            try:
+                close_result = self._stream.close()
+                if inspect.isawaitable(close_result):
+                    await close_result
+            except Exception as e:
+                logger.exception(
+                    "Exception closing stream for model %s: %s",
+                    self._model,
+                    e,
+                )
 
+        self._record_metrics()
         return False
 
     async def __aiter__(self) -> AsyncIterator[Any]:

@@ -10,6 +10,7 @@ from agentgauge.metrics import (
     LLM_REQUESTS_TOTAL,
     LLM_TOKENS_TOTAL,
     LLM_TOOL_CALLS_TOTAL,
+    LLM_TOOL_DURATION_SECONDS,
 )
 
 MODEL = "claude-sonnet-4-5-20250929"
@@ -21,6 +22,7 @@ MODEL = "claude-sonnet-4-5-20250929"
     "llm_active_requests",
     "llm_tool_calls",
     "llm_cache_tokens",
+    "llm_tool_duration_seconds",
 ])
 def test_metric_registered(name):
     metric_names = {m.name for m in REGISTRY.collect()}
@@ -33,6 +35,7 @@ def test_metric_registered(name):
     (LLM_ACTIVE_REQUESTS,         "llm_active_requests",       ("model",)),
     (LLM_TOOL_CALLS_TOTAL,        "llm_tool_calls",            ("model", "tool_name")),
     (LLM_CACHE_TOKENS_TOTAL,      "llm_cache_tokens",          ("model", "cache_type")),
+    (LLM_TOOL_DURATION_SECONDS,   "llm_tool_duration_seconds", ("tool_name",)),
 ])
 def test_metric_shape(metric, expected_name, expected_labels):
     assert metric._name == expected_name
