@@ -7,7 +7,7 @@ from langchain_core.tools import tool
 from langchain_core.runnables import RunnableConfig
 from langgraph.prebuilt import create_react_agent
 
-from agentgauge import AgentGaugeCallbackHandler
+from agentgauge import agentgaugeCallbackHandler
 from prometheus_client import start_http_server
 
 load_dotenv()
@@ -16,7 +16,7 @@ load_dotenv()
 start_http_server(9464)
 
 # Create the callback handler
-handler = AgentGaugeCallbackHandler()
+handler = agentgaugeCallbackHandler()
 
 llm = ChatOpenAI(
     model=os.getenv("OPENAI_MODEL", "gpt-4o-mini"),

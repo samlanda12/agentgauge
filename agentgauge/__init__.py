@@ -11,15 +11,21 @@ from .openai_wrapper import InstrumentedAsyncChatCompletion, InstrumentedChatCom
 __all__ = [
     "instrument",
     "InstrumentedMessages",
+    "InstrumentedAnthropicClient",
+    "InstrumentedAsyncAnthropicClient",
+    "InstrumentedAsyncChatCompletionProxy",
     "InstrumentedAsyncMessages",
+    "InstrumentedAsyncOpenAIClient",
     "InstrumentedChatCompletion",
     "InstrumentedAsyncChatCompletion",
+    "InstrumentedChatCompletionProxy",
+    "InstrumentedOpenAIClient",
 ]
 
 try:
-    from .langchain_callback import AgentGaugeCallbackHandler  # noqa: F401
+    from .langchain_callback import agentgaugeCallbackHandler  # noqa: F401
 
-    __all__.append("AgentGaugeCallbackHandler")
+    __all__.append("agentgaugeCallbackHandler")
 except ImportError:
     pass
 

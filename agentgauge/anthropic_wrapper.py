@@ -299,8 +299,10 @@ class InstrumentedStream:
                             model=self._model, tool_name=tool_name
                         ).inc()
             except Exception:
-                # If we can't get the final message, just skip token tracking
-                pass
+                logger.warning(
+                    "Failed to record token/tool metrics for model %s",
+                    self._model,
+                )
 
     def get_final_message(self) -> Any:
         """Get the final message from the stream (delegates to underlying stream)."""
@@ -420,8 +422,10 @@ class InstrumentedAsyncStream:
                             model=self._model, tool_name=tool_name
                         ).inc()
             except Exception:
-                # If we can't get the final message, just skip token tracking
-                pass
+                logger.warning(
+                    "Failed to record token/tool metrics for model %s",
+                    self._model,
+                )
 
     async def get_final_message(self) -> Any:
         """Get the final message from the stream (delegates to the entered stream)."""

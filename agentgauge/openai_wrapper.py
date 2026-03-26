@@ -54,6 +54,63 @@ def _extract_tool_calls_openai(response: Any) -> list[str]:
                                 tool_names.append(tool_call.function.name)
     return tool_names
 
+def _accumulate_tool_calls_from_chunk(chunk: Any, tool_calls: dict[int, str]) -> None:
+    """Accumulate tool call names from a streaming chunk.
+
+    OpenAI streaming sends tool calls as incremental deltas across multiple chunks.
+    Each chunk contains partial tool call data with an index to identify which
+    tool call it belongs to. The function name appears in the first chunk for
+    each tool call.
+
+    This function works with any OpenAI-compatible streaming format that follows the delta.tool_calls pattern.
+
+    Args:
+        chunk: A streaming chunk that may contain delta.tool_calls.
+        tool_calls: A dict mapping tool call index to tool name, modified in-place.
+    """
+    if not hasattr(chunk, "choices") or not chunk.choices:
+        return
+
+    for choice in chunk.choices:
+        if not hasattr(choice, "delta") or choice.delta is None:
+            continue
+        delta = choice.delta
+        if not hasattr(delta, "tool_calls") or delta.tool_calls is None:
+            continue
+
+        for tool_call in delta.tool_calls:
+            # Tool call may be a dict-like object or have attributes
+            index = None
+            name = None
+
+            # Get index: identifies which tool call this delta belongs to
+            if hasattr(tool_call, "index"):
+                index = tool_call.index
+            elif isinstance(tool_call, dict) and "index" in tool_call:
+                index = tool_call["index"]
+
+            if index is None:
+                continue
+
+            # Get function name: only present in the first chunk for each tool call
+            func = None
+            if isinstance(tool_call, dict) and "function" in tool_call:
+                func = tool_call["function"]
+            elif hasattr(tool_call, "function"):
+                func = tool_call.function  # type: ignore[union-attr]
+                if func is None:
+                    func = None
+
+            if func is not None:
+                if hasattr(func, "name") and func.name is not None:
+                    name = func.name
+                elif isinstance(func, dict) and func.get("name") is not None:
+                    name = func["name"]
+
+            # Store the name if we found one. Only in first chunk for each index
+            if name is not None and index not in tool_calls:
+                tool_calls[index] = name
+
 
 class InstrumentedAsyncChatCompletion:
     """Proxy around an AsyncOpenAI or async OpenAI-compatible "chat.completions" resource.
@@ -236,6 +293,7 @@ class InstrumentedOpenAIStream:
         self._status = "ok"
         self._entered = False
         self._usage: Any = None  # captured from the final usage chunk during iteration
+        self._tool_calls: dict[int, str] = {}  # accumulated tool calls by index
 
     def __enter__(self) -> "InstrumentedOpenAIStream":
         """Enter the stream context and start tracking metrics."""
@@ -290,6 +348,7 @@ class InstrumentedOpenAIStream:
             for chunk in self._stream:
                 if hasattr(chunk, "usage") and chunk.usage is not None:
                     self._usage = chunk.usage
+                _accumulate_tool_calls_from_chunk(chunk, self._tool_calls)
                 yield chunk
         except Exception:
             self._status = "error"
@@ -321,12 +380,16 @@ class InstrumentedOpenAIStream:
 
                     _record_openai_cache_tokens(self._usage, self._model)
 
-                for tool_name in _extract_tool_calls_openai(self._stream):
+                # Use accumulated tool calls from chunk iteration
+                for tool_name in self._tool_calls.values():
                     LLM_TOOL_CALLS_TOTAL.labels(
                         model=self._model, tool_name=tool_name
                     ).inc()
             except Exception:
-                pass
+                logger.warning(
+                    "Failed to record token/tool metrics for model %s",
+                    self._model,
+                )
 
 
 class InstrumentedAsyncOpenAIStream:
@@ -342,6 +405,7 @@ class InstrumentedAsyncOpenAIStream:
         self._status = "ok"
         self._entered = False
         self._usage: Any = None  # captured from the final usage chunk during iteration
+        self._tool_calls: dict[int, str] = {}  # accumulated tool calls by index
 
     async def __aenter__(self) -> "InstrumentedAsyncOpenAIStream":
         """Enter the async stream context and start tracking metrics."""
@@ -400,6 +464,7 @@ class InstrumentedAsyncOpenAIStream:
             async for chunk in self._stream:
                 if hasattr(chunk, "usage") and chunk.usage is not None:
                     self._usage = chunk.usage
+                _accumulate_tool_calls_from_chunk(chunk, self._tool_calls)
                 yield chunk
         except Exception:
             self._status = "error"
@@ -432,14 +497,16 @@ class InstrumentedAsyncOpenAIStream:
 
                     _record_openai_cache_tokens(self._usage, self._model)
 
-                # Check for tool calls in the stream object
-                for tool_name in _extract_tool_calls_openai(self._stream):
+                # Use accumulated tool calls from chunk iteration
+                for tool_name in self._tool_calls.values():
                     LLM_TOOL_CALLS_TOTAL.labels(
                         model=self._model, tool_name=tool_name
                     ).inc()
             except Exception:
-                # If we can't get token usage or tool calls, just skip it
-                pass
+                logger.warning(
+                    "Failed to record token/tool metrics for model %s",
+                    self._model,
+                )
 
     def __getattr__(self, name: str) -> Any:
         """Delegate all other attributes to the underlying stream."""
