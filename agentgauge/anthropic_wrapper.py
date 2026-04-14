@@ -83,17 +83,17 @@ class InstrumentedMessages:
             LLM_REQUESTS_TOTAL.labels(model=model, method="create", status=status).inc()
             LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="create").observe(duration)
 
-        if hasattr(response, "usage") and response.usage is not None:
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
-
-            LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
-            LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
-
-            _record_anthropic_cache_tokens(response.usage, model)
-
-        for tool_name in _extract_tool_calls_anthropic(response):
-            LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
+        try:
+            if hasattr(response, "usage") and response.usage is not None:
+                input_tokens = response.usage.input_tokens
+                output_tokens = response.usage.output_tokens
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+                _record_anthropic_cache_tokens(response.usage, model)
+            for tool_name in _extract_tool_calls_anthropic(response):
+                LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
+        except Exception:
+            logger.warning("Failed to record token/tool metrics for model %s", model)
 
         return response
 
@@ -156,17 +156,17 @@ class InstrumentedAsyncMessages:
             LLM_REQUESTS_TOTAL.labels(model=model, method="create", status=status).inc()
             LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="create").observe(duration)
 
-        if hasattr(response, "usage") and response.usage is not None:
-            input_tokens = response.usage.input_tokens
-            output_tokens = response.usage.output_tokens
-
-            LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
-            LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
-
-            _record_anthropic_cache_tokens(response.usage, model)
-
-        for tool_name in _extract_tool_calls_anthropic(response):
-            LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
+        try:
+            if hasattr(response, "usage") and response.usage is not None:
+                input_tokens = response.usage.input_tokens
+                output_tokens = response.usage.output_tokens
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+                _record_anthropic_cache_tokens(response.usage, model)
+            for tool_name in _extract_tool_calls_anthropic(response):
+                LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
+        except Exception:
+            logger.warning("Failed to record token/tool metrics for model %s", model)
 
         return response
 

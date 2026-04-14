@@ -163,6 +163,16 @@ class TestCreateMetrics:
         # When prompt_tokens_details is None, the metric should not exist (returns None)
         assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") is None
 
+    def test_create_does_not_propagate_metric_recording_error(self, inner):
+        """Instrumentation errors must not surface as exceptions to the caller."""
+        # None token counts cause .inc(None) → TypeError without the guard.
+        inner.create.return_value = FakeChatCompletion(
+            usage=FakeUsage(prompt_tokens=None, completion_tokens=None)  # type: ignore[arg-type]
+        )
+        wrapped = InstrumentedChatCompletion(inner)
+        result = wrapped.create(model=MODEL, messages=[])
+        assert result is not None  # call succeeds despite broken token data
+
 
 class TestCreateErrorHandling:
     def test_error_is_reraised(self, wrapped_with_error):
