@@ -302,6 +302,7 @@ class InstrumentedStream:
                 logger.warning(
                     "Failed to record token/tool metrics for model %s",
                     self._model,
+                    exc_info=True,
                 )
 
     def get_final_message(self) -> Any:
@@ -425,6 +426,7 @@ class InstrumentedAsyncStream:
                 logger.warning(
                     "Failed to record token/tool metrics for model %s",
                     self._model,
+                    exc_info=True,
                 )
 
     async def get_final_message(self) -> Any:

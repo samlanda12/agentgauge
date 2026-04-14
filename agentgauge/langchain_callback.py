@@ -12,7 +12,7 @@ try:
     from langchain_core.outputs import LLMResult
 except ImportError as e:
     raise ImportError(
-        "langchain-core is required to use agentgaugeCallbackHandler. "
+        "langchain-core is required to use AgentGaugeCallbackHandler. "
         "Install it with: pip install agentgauge[langchain]"
     ) from e
 
@@ -164,14 +164,15 @@ def _record_token_usage(result: LLMResult, model: str) -> None:
             if isinstance(output_tokens, int):
                 LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
             _record_langchain_cache_tokens(usage_metadata, model)
-    except (IndexError, AttributeError):
+    except Exception:
         logger.warning(
             "Failed to record token metrics for model %s",
             model,
+            exc_info=True,
         )
 
 
-class agentgaugeCallbackHandler(BaseCallbackHandler):
+class AgentGaugeCallbackHandler(BaseCallbackHandler):
     """LangChain/LangGraph callback handler that records Prometheus metrics.
 
     Supports both LangChain chains and LangGraph workflows. Attach to any
@@ -189,7 +190,7 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
         self._completed_models: Dict[str, str] = {}  # Completed LLM runs
         self._tool_starts: Dict[str, float] = {}
         self._tool_names: Dict[str, str] = {}
-        self._tool_models: Dict[str, str] = {}
+        self._tool_models: Dict[str, str] = {}  # tool run_id -> parent run_id
         self._is_streaming: Dict[str, bool] = {}
 
     # Sync LLM callbacks
@@ -408,6 +409,11 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
             **kwargs,
         )
 
+    def _cleanup_completed_model(self, parent_key: str) -> None:
+        """Remove parent from _completed_models once no active tools remain for it."""
+        if parent_key not in self._tool_models.values():
+            self._completed_models.pop(parent_key, None)
+
     # Sync tool callbacks
 
     def on_tool_start(
@@ -429,14 +435,15 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
         """
         tool_name = (serialized or {}).get("name", "unknown")
         key = str(run_id)
+        parent_key = str(parent_run_id)
         self._tool_starts[key] = time.monotonic()
         self._tool_names[key] = tool_name
-        model = self._model_names.get(str(parent_run_id))
+        self._tool_models[key] = parent_key
+        model = self._model_names.get(parent_key)
         if model is None:
-            model = self._completed_models.get(str(parent_run_id))
+            model = self._completed_models.get(parent_key)
         if model is None:
             model = "unknown"
-        self._tool_models[key] = model
         LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
 
     def on_tool_end(
@@ -454,7 +461,9 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
         if tool_name is None:
             return
 
-        self._tool_models.pop(key, None)
+        parent_key = self._tool_models.pop(key, None)
+        if parent_key:
+            self._cleanup_completed_model(parent_key)
 
         if key in self._tool_starts:
             duration = time.monotonic() - self._tool_starts.pop(key)
@@ -475,7 +484,9 @@ class agentgaugeCallbackHandler(BaseCallbackHandler):
         if tool_name is None:
             return
 
-        self._tool_models.pop(key, None)
+        parent_key = self._tool_models.pop(key, None)
+        if parent_key:
+            self._cleanup_completed_model(parent_key)
 
         if key in self._tool_starts:
             duration = time.monotonic() - self._tool_starts.pop(key)

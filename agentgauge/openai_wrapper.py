@@ -389,6 +389,7 @@ class InstrumentedOpenAIStream:
                 logger.warning(
                     "Failed to record token/tool metrics for model %s",
                     self._model,
+                    exc_info=True,
                 )
 
 
@@ -506,6 +507,7 @@ class InstrumentedAsyncOpenAIStream:
                 logger.warning(
                     "Failed to record token/tool metrics for model %s",
                     self._model,
+                    exc_info=True,
                 )
 
     def __getattr__(self, name: str) -> Any:

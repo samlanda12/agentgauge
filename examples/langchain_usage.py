@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 from prometheus_client import start_http_server
 
-from agentgauge import agentgaugeCallbackHandler
+from agentgauge import AgentGaugeCallbackHandler
 
 load_dotenv()
 
@@ -13,7 +13,7 @@ load_dotenv()
 start_http_server(9464)
 
 # Create the callback handler
-handler = agentgaugeCallbackHandler()
+handler = AgentGaugeCallbackHandler()
 
 # Attach to any LangChain chat model
 llm = ChatOpenAI(
