@@ -152,6 +152,18 @@ def test_start_server_false_skips(mock_server, mock_anthropic_client):
     mock_server.assert_not_called()
 
 
+def test_instrument_raises_on_invalid_port(mock_anthropic_client):
+    with pytest.raises(ValueError, match="port must be between 1 and 65535"):
+        instrument(mock_anthropic_client, port=0, start_server=False)
+
+
+@patch("agentgauge.start_http_server")
+def test_instrument_raises_on_port_conflict(mock_server, mock_anthropic_client):
+    instrument(mock_anthropic_client, port=9000)
+    with pytest.raises(ValueError, match="already started on port 9000"):
+        instrument(mock_anthropic_client, port=9001)
+
+
 # Async client detection
 
 def test_detects_async_anthropic_client(mock_async_anthropic_client):
