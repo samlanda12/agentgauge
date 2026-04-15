@@ -32,6 +32,7 @@ except ImportError:
 __version__ = "0.1.0"
 
 _server_started = False
+_server_port: int = 0
 _server_lock = threading.Lock()
 
 DEFAULT_PORT = 9464
@@ -182,15 +183,24 @@ def instrument(
         An instrumented client that records metrics on every API call.
 
     Raises:
-        ValueError: If client type cannot be determined.
+        ValueError: If client type cannot be determined or port is invalid.
     """
-    global _server_started
+    global _server_started, _server_port
+
+    if not (1 <= port <= 65535):
+        raise ValueError(f"port must be between 1 and 65535, got {port}")
 
     if start_server:
         with _server_lock:
             if not _server_started:
                 start_http_server(port)
                 _server_started = True
+                _server_port = port
+            elif _server_port != port:
+                raise ValueError(
+                    f"Metrics server already started on port {_server_port}; "
+                    f"cannot start on port {port}"
+                )
 
     is_async = _is_async_client(client)
 

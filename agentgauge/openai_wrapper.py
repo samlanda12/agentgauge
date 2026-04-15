@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 import inspect
+from collections.abc import Mapping
 from typing import Any, AsyncIterator, Iterator, Optional
 
 from .metrics import (
@@ -98,8 +99,6 @@ def _accumulate_tool_calls_from_chunk(chunk: Any, tool_calls: dict[int, str]) ->
                 func = tool_call["function"]
             elif hasattr(tool_call, "function"):
                 func = tool_call.function  # type: ignore[union-attr]
-                if func is None:
-                    func = None
 
             if func is not None:
                 if hasattr(func, "name") and func.name is not None:
@@ -140,17 +139,17 @@ class InstrumentedAsyncChatCompletion:
             LLM_REQUESTS_TOTAL.labels(model=model, method="create", status=status).inc()
             LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="create").observe(duration)
 
-        if hasattr(response, "usage") and response.usage is not None:
-            input_tokens = response.usage.prompt_tokens
-            output_tokens = response.usage.completion_tokens
-
-            LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
-            LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
-
-            _record_openai_cache_tokens(response.usage, model)
-
-        for tool_name in _extract_tool_calls_openai(response):
-            LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
+        try:
+            if hasattr(response, "usage") and response.usage is not None:
+                input_tokens = response.usage.prompt_tokens
+                output_tokens = response.usage.completion_tokens
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+                _record_openai_cache_tokens(response.usage, model)
+            for tool_name in _extract_tool_calls_openai(response):
+                LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
+        except Exception:
+            logger.warning("Failed to record token/tool metrics for model %s", model, exc_info=True)
 
         return response
 
@@ -181,7 +180,7 @@ class InstrumentedAsyncChatCompletion:
 
         # Automatically inject stream_options to enable usage tracking
         existing_options = kwargs.get("stream_options")
-        if existing_options is None or not isinstance(existing_options, dict):
+        if not isinstance(existing_options, Mapping):
             existing_options = {}
         kwargs["stream_options"] = {**existing_options, "include_usage": True}
 
@@ -225,17 +224,17 @@ class InstrumentedChatCompletion:
             LLM_REQUESTS_TOTAL.labels(model=model, method="create", status=status).inc()
             LLM_REQUEST_DURATION_SECONDS.labels(model=model, method="create").observe(duration)
 
-        if hasattr(response, "usage") and response.usage is not None:
-            input_tokens = response.usage.prompt_tokens
-            output_tokens = response.usage.completion_tokens
-
-            LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
-            LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
-
-            _record_openai_cache_tokens(response.usage, model)
-
-        for tool_name in _extract_tool_calls_openai(response):
-            LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
+        try:
+            if hasattr(response, "usage") and response.usage is not None:
+                input_tokens = response.usage.prompt_tokens
+                output_tokens = response.usage.completion_tokens
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="input").inc(input_tokens)
+                LLM_TOKENS_TOTAL.labels(model=model, token_type="output").inc(output_tokens)
+                _record_openai_cache_tokens(response.usage, model)
+            for tool_name in _extract_tool_calls_openai(response):
+                LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
+        except Exception:
+            logger.warning("Failed to record token/tool metrics for model %s", model, exc_info=True)
 
         return response
 
@@ -264,7 +263,9 @@ class InstrumentedChatCompletion:
         kwargs["stream"] = True
 
         # Automatically inject stream_options to enable usage tracking
-        existing_options = kwargs.get("stream_options", {})
+        existing_options = kwargs.get("stream_options")
+        if not isinstance(existing_options, Mapping):
+            existing_options = {}
         kwargs["stream_options"] = {**existing_options, "include_usage": True}
 
         try:

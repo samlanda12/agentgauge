@@ -677,3 +677,57 @@ class TestCacheTokenTracking:
                 run_id=run_id,
             )
         assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="read") == 30.0
+
+
+class TestStaleRunEviction:
+    def test_evicts_stale_llm_run_on_next_start(self, handler):
+        """A run that never completes gets evicted when a new run starts."""
+        import time
+        from agentgauge.metrics import LLM_ACTIVE_REQUESTS
+
+        old_run = uuid4()
+        key = str(old_run)
+        # Manually insert an entry that started 2 hours ago
+        handler._request_starts[key] = time.monotonic() - 7201
+        handler._model_names[key] = MODEL
+        handler._is_streaming[key] = False
+        # Simulate the active-request gauge that was incremented when the run started
+        LLM_ACTIVE_REQUESTS.labels(model=MODEL).inc()
+
+        # A new run starting should trigger eviction
+        new_run = uuid4()
+        handler.on_llm_start(_serialized(), ["hello"], run_id=new_run, **_invocation_kwargs())
+
+        assert key not in handler._request_starts
+        assert key not in handler._model_names
+
+    def test_evicts_stale_tool_run_on_next_tool_start(self, handler):
+        """A tool run that never completes gets evicted when a new tool run starts."""
+        import time
+
+        old_run = uuid4()
+        key = str(old_run)
+        handler._tool_starts[key] = time.monotonic() - 7201
+        handler._tool_names[key] = "search"
+        handler._tool_models[key] = str(uuid4())
+
+        new_run = uuid4()
+        handler.on_tool_start({"name": "search"}, "input", run_id=new_run)
+
+        assert key not in handler._tool_starts
+        assert key not in handler._tool_names
+
+    def test_does_not_evict_recent_runs(self, handler):
+        """Runs started within the TTL window are left alone."""
+        import time
+
+        run = uuid4()
+        key = str(run)
+        handler._request_starts[key] = time.monotonic() - 10  # 10 seconds ago
+        handler._model_names[key] = MODEL
+        handler._is_streaming[key] = False
+
+        new_run = uuid4()
+        handler.on_llm_start(_serialized(), ["hello"], run_id=new_run, **_invocation_kwargs())
+
+        assert key in handler._request_starts

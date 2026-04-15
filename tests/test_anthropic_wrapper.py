@@ -143,6 +143,16 @@ class TestCreateMetrics:
         # The metric is recorded with value 0, which is technically fine
         assert _sample("llm_cache_tokens_total", model=MODEL, cache_type="creation") == 0.0
 
+    def test_create_does_not_propagate_metric_recording_error(self, inner):
+        """Instrumentation errors must not surface as exceptions to the caller."""
+        # None token counts cause .inc(None) → TypeError without the guard.
+        inner.create.return_value = FakeMessage(
+            usage=FakeUsage(input_tokens=None, output_tokens=None)  # type: ignore[arg-type]
+        )
+        wrapped = InstrumentedMessages(inner)
+        result = wrapped.create(model=MODEL, max_tokens=1024, messages=[])
+        assert result is not None  # call succeeds despite broken token data
+
 
 class TestCreateErrorHandling:
     def test_error_is_reraised(self, wrapped_with_error):

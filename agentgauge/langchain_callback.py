@@ -172,6 +172,9 @@ def _record_token_usage(result: LLMResult, model: str) -> None:
         )
 
 
+_STALE_RUN_TTL_SECONDS: float = 3600.0  # 1 hour
+
+
 class AgentGaugeCallbackHandler(BaseCallbackHandler):
     """LangChain/LangGraph callback handler that records Prometheus metrics.
 
@@ -193,6 +196,36 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         self._tool_models: Dict[str, str] = {}  # tool run_id -> parent run_id
         self._is_streaming: Dict[str, bool] = {}
 
+    def _evict_stale_runs(self) -> None:
+        """Remove LLM run entries that started more than TTL seconds ago without completing."""
+        cutoff = time.monotonic() - _STALE_RUN_TTL_SECONDS
+        stale = [k for k, v in self._request_starts.items() if v < cutoff]
+        if stale:
+            logger.warning(
+                "Evicting %d stale LLM run(s) from callback tracking (TTL exceeded)",
+                len(stale),
+            )
+        for key in stale:
+            model = self._model_names.pop(key, "unknown")
+            self._request_starts.pop(key, None)
+            self._is_streaming.pop(key, None)
+            self._completed_models.pop(key, None)
+            LLM_ACTIVE_REQUESTS.labels(model=model).dec()
+
+    def _evict_stale_tool_runs(self) -> None:
+        """Remove tool run entries that started more than TTL seconds ago without completing."""
+        cutoff = time.monotonic() - _STALE_RUN_TTL_SECONDS
+        stale = [k for k, v in self._tool_starts.items() if v < cutoff]
+        if stale:
+            logger.warning(
+                "Evicting %d stale tool run(s) from callback tracking (TTL exceeded)",
+                len(stale),
+            )
+        for key in stale:
+            self._tool_starts.pop(key, None)
+            self._tool_names.pop(key, None)
+            self._tool_models.pop(key, None)
+
     # Sync LLM callbacks
 
     def on_llm_start(
@@ -207,6 +240,7 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         """Called when a text LLM starts a request."""
+        self._evict_stale_runs()
         model = _extract_model(serialized, kwargs)
         key = str(run_id)
         self._request_starts[key] = time.monotonic()
@@ -226,6 +260,7 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         **kwargs: Any,
     ) -> None:
         """Called when a chat model starts a request (ChatOpenAI, ChatAnthropic, etc.)."""
+        self._evict_stale_runs()
         model = _extract_model(serialized, kwargs)
         key = str(run_id)
         self._request_starts[key] = time.monotonic()
@@ -433,6 +468,7 @@ class AgentGaugeCallbackHandler(BaseCallbackHandler):
         If the parent LLM run is not tracked or has already completed, model defaults
         to "unknown".
         """
+        self._evict_stale_tool_runs()
         tool_name = (serialized or {}).get("name", "unknown")
         key = str(run_id)
         parent_key = str(parent_run_id)
