@@ -93,7 +93,7 @@ class InstrumentedMessages:
             for tool_name in _extract_tool_calls_anthropic(response):
                 LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
         except Exception:
-            logger.warning("Failed to record token/tool metrics for model %s", model)
+            logger.warning("Failed to record token/tool metrics for model %s", model, exc_info=True)
 
         return response
 
@@ -166,7 +166,7 @@ class InstrumentedAsyncMessages:
             for tool_name in _extract_tool_calls_anthropic(response):
                 LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
         except Exception:
-            logger.warning("Failed to record token/tool metrics for model %s", model)
+            logger.warning("Failed to record token/tool metrics for model %s", model, exc_info=True)
 
         return response
 

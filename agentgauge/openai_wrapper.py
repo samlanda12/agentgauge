@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import time
 import inspect
+from collections.abc import Mapping
 from typing import Any, AsyncIterator, Iterator, Optional
 
 from .metrics import (
@@ -148,7 +149,7 @@ class InstrumentedAsyncChatCompletion:
             for tool_name in _extract_tool_calls_openai(response):
                 LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
         except Exception:
-            logger.warning("Failed to record token/tool metrics for model %s", model)
+            logger.warning("Failed to record token/tool metrics for model %s", model, exc_info=True)
 
         return response
 
@@ -179,7 +180,7 @@ class InstrumentedAsyncChatCompletion:
 
         # Automatically inject stream_options to enable usage tracking
         existing_options = kwargs.get("stream_options")
-        if existing_options is None or not isinstance(existing_options, dict):
+        if not isinstance(existing_options, Mapping):
             existing_options = {}
         kwargs["stream_options"] = {**existing_options, "include_usage": True}
 
@@ -233,7 +234,7 @@ class InstrumentedChatCompletion:
             for tool_name in _extract_tool_calls_openai(response):
                 LLM_TOOL_CALLS_TOTAL.labels(model=model, tool_name=tool_name).inc()
         except Exception:
-            logger.warning("Failed to record token/tool metrics for model %s", model)
+            logger.warning("Failed to record token/tool metrics for model %s", model, exc_info=True)
 
         return response
 
@@ -263,7 +264,7 @@ class InstrumentedChatCompletion:
 
         # Automatically inject stream_options to enable usage tracking
         existing_options = kwargs.get("stream_options")
-        if existing_options is None or not isinstance(existing_options, dict):
+        if not isinstance(existing_options, Mapping):
             existing_options = {}
         kwargs["stream_options"] = {**existing_options, "include_usage": True}
 
